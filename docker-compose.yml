@@ -1,0 +1,23 @@
+# Base de datos de la app (biblioteca de plantillas).
+# Arrancar una vez antes de `npm run dev`:  docker compose up -d
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ttg-db
+    environment:
+      POSTGRES_USER: ttg
+      POSTGRES_PASSWORD: ttg
+      POSTGRES_DB: ttg
+    ports:
+      # 5433 en el host para no chocar con un Postgres local en 5432.
+      - '5433:5432'
+    volumes:
+      - ttg-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ttg -d ttg']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  ttg-pgdata:

@@ -1,0 +1,39 @@
+
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+/* Field "chip" — the visual token for {{campo}} inside the template editor. */
+.ttg-chip {
+  display: inline;
+  background: #e0e7ff;
+  color: #3730a3;
+  border-radius: 6px;
+  padding: 0 6px;
+  margin: 0 1px;
+  font-weight: 600;
+  font-size: 0.95em;
+  white-space: nowrap;
+  cursor: default;
+  user-select: all;
+}
+
+/* Placeholder text for the empty contenteditable editor. */
+.ttg-editor:empty::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+}
+
