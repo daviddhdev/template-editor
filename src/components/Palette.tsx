@@ -31,13 +31,13 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
   }
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col gap-5 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4">
+    <aside className="flex w-[15.25rem] shrink-0 flex-col gap-6 overflow-y-auto rounded-xl border border-hairline bg-surface p-4 shadow-e1">
       <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Datos — arrastra al documento
+        <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+          Datos · arrastra al documento
         </h3>
         {columns.length === 0 ? (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-muted">
             Carga una hoja de datos arriba y sus columnas aparecerán aquí.
           </p>
         ) : (
@@ -53,9 +53,9 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
                 }}
                 onClick={() => canvas.current?.insertField(col)}
                 title="Arrastra al documento o haz clic para insertarlo donde está el cursor"
-                className="inline-flex cursor-grab items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-sm font-medium text-indigo-700 hover:bg-indigo-100 active:cursor-grabbing"
+                className="inline-flex cursor-grab items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary hover:bg-primary/15 active:cursor-grabbing"
               >
-                <GripVertical className="h-3 w-3 text-indigo-300" />
+                <GripVertical className="h-3 w-3 opacity-50" />
                 {col}
               </button>
             ))}
@@ -73,7 +73,7 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
               }
             }}
             placeholder="Otro campo…"
-            className="w-full rounded-lg border border-slate-300 px-2 py-1 text-sm outline-none focus:border-indigo-500"
+            className="w-full rounded-lg border border-input-border bg-surface px-2.5 py-1 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-primary"
           />
           <button
             onClick={() => {
@@ -83,7 +83,7 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
               }
             }}
             disabled={!customName.trim()}
-            className="rounded-lg border border-slate-300 p-1.5 text-slate-500 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-40"
+            className="rounded-lg border border-hairline bg-surface p-1.5 text-ink-secondary shadow-e1 outline-none hover:bg-canvas-soft focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
             title="Insertar campo con este nombre"
             aria-label="Insertar campo con este nombre"
           >
@@ -94,7 +94,7 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
         {unbound.length > 0 && columns.length > 0 ? (
           <button
             onClick={autoSuggest}
-            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary-active"
           >
             <Sparkles className="h-3.5 w-3.5" /> Sugerir vínculos automáticamente
           </button>
@@ -102,12 +102,12 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
       </section>
 
       <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Bloques — se aplican donde está el cursor
+        <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+          Bloques · se aplican donde está el cursor
         </h3>
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <PaletteBlock
-            icon={<GitBranch className="h-4 w-4 text-amber-500" />}
+            icon={<GitBranch className="h-4 w-4 text-accent-orange" />}
             label="Texto condicional"
             hint="Texto que solo aparece si se cumple una condición — arrastra o haz clic"
             onClick={() => canvas.current?.insertConditional()}
@@ -118,7 +118,7 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
             }}
           />
           <PaletteBlock
-            icon={<Repeat className="h-4 w-4 text-emerald-500" />}
+            icon={<Repeat className="h-4 w-4 text-accent-teal" />}
             label="Repetir por fila"
             hint={
               group.mode === 'per_group'
@@ -131,7 +131,7 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
       </section>
 
       {unbound.length > 0 ? (
-        <section className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+        <section className="rounded-lg border border-accent-orange/30 bg-accent-orange/5 p-2.5 text-xs text-accent-orange">
           <strong>{unbound.length}</strong> {unbound.length === 1 ? 'campo necesita' : 'campos necesitan'}{' '}
           un dato: {unbound.join(', ')}. Haz clic en el campo (en el documento) para elegirlo.
         </section>
@@ -161,12 +161,12 @@ function PaletteBlock({
       title={hint}
       draggable={draggable}
       onDragStart={onDragStart}
-      className={`flex items-center gap-2.5 rounded-lg border border-slate-200 px-2.5 py-2 text-left text-sm text-slate-700 hover:border-slate-300 hover:bg-slate-50 ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      className={`flex items-start gap-2.5 rounded-lg border border-hairline bg-surface px-3 py-2.5 text-left text-sm hover:border-ink-faint/40 hover:bg-canvas-soft ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
     >
-      {icon}
+      <span className="mt-0.5 shrink-0">{icon}</span>
       <span>
-        <span className="block font-medium">{label}</span>
-        <span className="block text-[11px] leading-tight text-slate-500">{hint}</span>
+        <span className="block font-semibold text-ink">{label}</span>
+        <span className="mt-0.5 block text-xs leading-snug text-ink-muted">{hint}</span>
       </span>
     </button>
   )

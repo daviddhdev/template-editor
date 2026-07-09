@@ -99,17 +99,17 @@ const EDITOR_BASE_CSS = `body{font-family:Arial,Helvetica,sans-serif;color:#111;
 
 /** Editor-only chrome: a grey canvas, a page shadow, and the field chip. */
 const EDITOR_CHROME_CSS = `
-  html{background:#e5e7eb;}
-  body{margin:24px auto !important;outline:none;box-shadow:0 1px 2px rgba(0,0,0,.06),0 12px 30px rgba(0,0,0,.12);}
-  .ttg-chip{display:inline;background:#e0e7ff;color:#3730a3;border-radius:6px;padding:0 6px;margin:0 1px;font-weight:600;white-space:nowrap;cursor:pointer;}
+  html{background:#eceae7;}
+  body{margin:24px auto !important;outline:none;box-shadow:0 2px 8px rgba(15,15,15,.06),0 9px 24px rgba(15,15,15,.1);}
+  .ttg-chip{display:inline;background:rgba(0,117,222,.1);color:#0075de;border-radius:4px;padding:1px 6px;margin:0 1px;font-weight:500;white-space:nowrap;cursor:pointer;}
   /* Field whose name matches no data column yet: needs a click to bind. */
-  .ttg-chip.ttg-unbound{background:#fef3c7;color:#92400e;outline:1px dashed #f59e0b;}
+  .ttg-chip.ttg-unbound{background:rgba(221,91,0,.08);color:#793400;outline:1px dashed #dd5b00;}
   /* Section repeated once per row of the group. */
-  [data-ttg-repeat="true"]{position:relative;border-left:3px solid #34d399;padding-left:8px !important;background:rgba(52,211,153,.07);}
-  [data-ttg-repeat="true"]::before{content:'se repite por cada fila';position:absolute;top:-9px;left:8px;background:#d1fae5;color:#047857;font:600 9px Arial,sans-serif;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px;border-radius:6px;}
+  [data-ttg-repeat="true"]{position:relative;border-left:3px solid #2a9d99;padding-left:8px !important;background:rgba(42,157,153,.06);}
+  [data-ttg-repeat="true"]::before{content:'se repite por cada fila';position:absolute;top:-9px;left:8px;background:#e3f1f0;color:#1d6f6c;font:600 9px Inter,Arial,sans-serif;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px;border-radius:6px;}
   /* Inline conditional block: shows a readable summary, click to edit. */
-  .ttg-cond{display:block;margin:8px 0;padding:8px 12px;border:1.5px solid #f59e0b;border-radius:10px;background:#fffbeb;color:#92400e;font:500 12px/1.6 Arial,sans-serif;cursor:pointer;}
-  .ttg-cond::before{content:'texto condicional — clic para editar';display:block;margin-bottom:2px;color:#b45309;font:600 9px Arial,sans-serif;letter-spacing:.4px;text-transform:uppercase;}
+  .ttg-cond{display:block;margin:8px 0;padding:8px 12px;border:1px solid rgba(221,91,0,.45);border-radius:8px;background:rgba(221,91,0,.05);color:#793400;font:500 12px/1.6 Inter,Arial,sans-serif;cursor:pointer;}
+  .ttg-cond::before{content:'texto condicional — clic para editar';display:block;margin-bottom:2px;color:#dd5b00;font:600 9px Inter,Arial,sans-serif;letter-spacing:.4px;text-transform:uppercase;}
   .ttg-cond .ttg-cond-line{display:block;}
 `
 

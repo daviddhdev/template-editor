@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FileStack, Home, RotateCcw, Save } from 'lucide-react'
+import { Check, CircleCheck, FileStack, Home, RotateCcw, Save } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { rehydrateStores, useWorkspace } from '../state/workspaceStore'
 import type { GenerationPlan } from '../types'
@@ -13,7 +13,7 @@ import { GenerateDialog } from './GenerateDialog'
 import { GoogleConnect } from './GoogleConnect'
 import { PreviewFrame } from './PreviewFrame'
 import { SaveRecipeDialog } from './SaveRecipeDialog'
-import { ConfirmDialog, Pill, Toast } from './ui'
+import { ConfirmDialog, Toast } from './ui'
 
 /**
  * The single-screen workspace: top bar (sources, grouping, preview, generate),
@@ -134,22 +134,25 @@ export function Workspace() {
 
   const current = previewDocs[Math.min(previewIndex, Math.max(0, previewDocs.length - 1))]
 
+  const fieldsState: StepState =
+    !template || template.tags.length === 0 ? 'muted' : unbound.length > 0 ? 'warn' : 'ok'
+
   return (
-    <div className="mx-auto flex h-screen max-w-[110rem] flex-col gap-3 px-4 py-4">
-      <header className="flex items-center gap-2">
+    <div className="mx-auto flex h-screen max-w-[110rem] flex-col gap-3.5 px-5 py-4">
+      <header className="flex items-center gap-3">
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 outline-none hover:border-indigo-300 hover:text-indigo-700 focus-visible:ring-2 focus-visible:ring-indigo-500"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-sm font-medium text-ink-secondary shadow-e1 outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
         >
           <Home className="h-3.5 w-3.5" /> Inicio
         </Link>
-        <FileStack className="h-5 w-5 text-indigo-600" />
-        <h1 className="text-base font-bold text-slate-900">Generador de documentos</h1>
+        <FileStack className="h-5 w-5 text-accent-sky" />
+        <h1 className="text-lg font-bold tracking-tight text-ink">Generador de documentos</h1>
         <div className="ml-auto flex items-center gap-3">
           <button
             onClick={() => setSaveOpen(true)}
             disabled={!editorHtml.trim()}
-            className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 outline-none hover:border-indigo-300 hover:text-indigo-700 focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3.5 py-1.5 text-sm font-medium text-ink-secondary shadow-e1 outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
             title="Guarda el documento con sus campos, el enlace de datos, los vínculos y la agrupación en la biblioteca"
           >
             <Save className="h-3.5 w-3.5" /> Guardar plantilla
@@ -166,23 +169,30 @@ export function Workspace() {
 
       {/* Flow status: what is done, what is missing, why Generate is blocked
           (the reason used to live only in a hover tooltip). */}
-      <div className="flex flex-wrap items-center gap-2 px-1 text-xs">
-        <Pill tone={template ? 'ok' : 'muted'}>1 · Plantilla{template ? ' ✓' : ''}</Pill>
-        <Pill tone={data ? 'ok' : 'muted'}>
-          2 · Datos{data ? ` ✓ ${data.rows.length} ${data.rows.length === 1 ? 'fila' : 'filas'}` : ''}
-        </Pill>
-        <Pill
-          tone={
-            !template || template.tags.length === 0 ? 'muted' : unbound.length > 0 ? 'warn' : 'ok'
-          }
+      <div className="flex flex-wrap items-center gap-2.5 px-0.5 text-xs">
+        <StepPill n={1} state={template ? 'ok' : 'muted'}>
+          Plantilla
+        </StepPill>
+        <StepJoint done={Boolean(template && data)} />
+        <StepPill n={2} state={data ? 'ok' : 'muted'}>
+          Datos{data ? ` · ${data.rows.length} ${data.rows.length === 1 ? 'fila' : 'filas'}` : ''}
+        </StepPill>
+        <StepJoint done={fieldsState === 'ok'} />
+        <StepPill n={3} state={fieldsState}>
+          Campos
+          {template && template.tags.length > 0 ? ` · ${boundCount}/${template.tags.length} vinculados` : ''}
+        </StepPill>
+        <span
+          role="status"
+          className={`inline-flex items-center gap-1.5 font-semibold ${
+            generateBlockedReason ? 'text-accent-orange' : 'text-accent-green'
+          }`}
         >
-          3 · Campos{template && template.tags.length > 0 ? ` ${boundCount}/${template.tags.length} vinculados` : ''}
-        </Pill>
-        <span role="status" className={generateBlockedReason ? 'text-amber-700' : 'text-emerald-700'}>
+          {generateBlockedReason ? null : <CircleCheck className="h-4 w-4" />}
           {generateBlockedReason ?? 'Listo para generar.'}
         </span>
         {group.mode === 'per_row' && editorHtml.includes('data-ttg-repeat') ? (
-          <span className="text-amber-700">
+          <span className="text-accent-orange">
             Hay secciones repetibles, pero en «un documento por fila» no se repiten: cambia a «un
             documento por grupo».
           </span>
@@ -190,14 +200,14 @@ export function Workspace() {
         {hasWork ? (
           <button
             onClick={() => setConfirmReset(true)}
-            className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-500 outline-none hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-ink-faint outline-none hover:bg-black/5 hover:text-ink-secondary focus-visible:ring-2 focus-visible:ring-primary"
           >
             <RotateCcw className="h-3 w-3" /> Empezar de nuevo
           </button>
         ) : null}
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-3">
+      <div className="flex min-h-0 flex-1 gap-3.5">
         <Palette canvas={canvasRef} />
 
         <main className="relative min-w-0 flex-1">
@@ -208,12 +218,12 @@ export function Workspace() {
           {view === 'preview' ? (
             <div className="flex h-full flex-col gap-2">
               {previewDocs.length > 1 ? (
-                <label className="flex items-center gap-2 text-sm text-slate-600">
+                <label className="flex items-center gap-2 text-sm text-ink-secondary">
                   Ver documento
                   <select
                     value={previewIndex}
                     onChange={(e) => setPreviewIndex(Number(e.target.value))}
-                    className="max-w-[18rem] rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-indigo-500"
+                    className="max-w-[18rem] rounded-lg border border-hairline bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
                   >
                     {previewDocs.map((d, i) => (
                       <option key={i} value={i}>
@@ -226,7 +236,7 @@ export function Workspace() {
               {current ? (
                 <PreviewFrame html={current.html} className="min-h-0 flex-1" />
               ) : (
-                <p className="text-sm text-slate-400">Nada que previsualizar todavía.</p>
+                <p className="text-sm text-ink-faint">Nada que previsualizar todavía.</p>
               )}
             </div>
           ) : null}
@@ -261,4 +271,35 @@ export function Workspace() {
       <Toast text={notice} token={noticeToken} onDismiss={clearNotice} />
     </div>
   )
+}
+
+type StepState = 'ok' | 'warn' | 'muted'
+
+/** One step of the flow stepper: a numbered circle (check when done) in a pill. */
+function StepPill({ n, state, children }: { n: number; state: StepState; children: React.ReactNode }) {
+  const wrap: Record<StepState, string> = {
+    ok: 'bg-accent-green/10 text-accent-green',
+    warn: 'bg-accent-orange/10 text-accent-orange',
+    muted: 'border border-hairline bg-surface text-ink-muted',
+  }
+  const dot: Record<StepState, string> = {
+    ok: 'bg-accent-green text-white',
+    warn: 'bg-accent-orange text-white',
+    muted: 'bg-hairline text-ink-muted',
+  }
+  return (
+    <span
+      className={`inline-flex h-[30px] items-center gap-1.5 rounded-full py-0 pl-1.5 pr-3 text-xs font-medium ${wrap[state]}`}
+    >
+      <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full text-[10px] font-semibold ${dot[state]}`}>
+        {state === 'ok' ? <Check className="h-2.5 w-2.5" strokeWidth={3.5} /> : state === 'warn' ? '!' : ''}
+      </span>
+      {n} · {children}
+    </span>
+  )
+}
+
+/** Connector line between two steps; green when the left step is done. */
+function StepJoint({ done }: { done: boolean }) {
+  return <span aria-hidden className={`h-0.5 w-5 rounded-full ${done ? 'bg-accent-green/30' : 'bg-hairline'}`} />
 }

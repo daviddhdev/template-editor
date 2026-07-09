@@ -5,7 +5,7 @@ export const Route = createFileRoute('/editor')({ component: Editor })
 
 function Editor() {
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="min-h-screen bg-canvas-soft">
       <Workspace />
     </main>
   )

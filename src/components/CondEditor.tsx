@@ -10,7 +10,7 @@ const OPERATORS: { value: ConditionOperator; label: string }[] = [
 ]
 
 const selectCls =
-  'rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-indigo-500'
+  'rounded-lg border border-input-border bg-surface px-2 py-1.5 text-sm text-ink-secondary outline-none focus:border-primary'
 
 function uid(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -48,15 +48,15 @@ export function CondEditor({
     <div
       role="dialog"
       aria-label={`Editar condición ${rule.label}`}
-      className="absolute left-1/2 top-4 z-20 max-h-[85%] w-[26rem] -translate-x-1/2 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
+      className="absolute left-1/2 top-4 z-20 max-h-[85%] w-[26rem] -translate-x-1/2 overflow-y-auto rounded-xl border border-hairline bg-surface p-4 shadow-e2"
     >
       <div className="mb-3 flex items-center gap-2">
-        <GitBranch className="h-4 w-4 shrink-0 text-amber-500" />
+        <GitBranch className="h-4 w-4 shrink-0 text-accent-orange" />
         <input
           value={rule.label}
           onChange={(e) => setRule((r) => ({ ...r, label: e.target.value }))}
           autoFocus
-          className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-sm font-medium text-slate-800 outline-none focus:border-indigo-500"
+          className="flex-1 rounded-lg border border-input-border px-2 py-1 text-sm font-medium text-ink outline-none focus:border-primary"
           title="Nombre de esta condición"
           aria-label="Nombre de esta condición"
         />
@@ -64,8 +64,8 @@ export function CondEditor({
 
       <div className="space-y-2.5">
         {rule.branches.map((br, i) => (
-          <div key={br.id} className="rounded-lg bg-slate-50 p-2.5">
-            <div className="flex flex-wrap items-center gap-1.5 text-sm text-slate-600">
+          <div key={br.id} className="rounded-lg bg-canvas-soft p-2.5">
+            <div className="flex flex-wrap items-center gap-1.5 text-sm text-ink-muted">
               <span className="font-medium">{i === 0 ? 'Si' : 'O si'}</span>
               <select
                 value={br.column}
@@ -96,14 +96,14 @@ export function CondEditor({
                 onChange={(e) => patchBranch(br.id, { value: e.target.value })}
                 placeholder="valor"
                 aria-label="Valor con el que comparar"
-                className="w-24 rounded-lg border border-slate-300 px-2 py-1 outline-none focus:border-indigo-500"
+                className="w-24 rounded-lg border border-input-border bg-surface px-2 py-1 outline-none placeholder:text-ink-faint focus:border-primary"
               />
               {rule.branches.length > 1 ? (
                 <button
                   onClick={() =>
                     setRule((r) => ({ ...r, branches: r.branches.filter((b) => b.id !== br.id) }))
                   }
-                  className="ml-auto rounded-md p-1 text-slate-500 outline-none hover:text-red-500 focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  className="ml-auto rounded-md p-1 text-ink-faint outline-none hover:text-red-500 focus-visible:ring-2 focus-visible:ring-primary"
                   title="Quitar esta condición"
                   aria-label="Quitar esta condición"
                 >
@@ -117,7 +117,7 @@ export function CondEditor({
               placeholder="Mostrar este texto… (puede incluir campos como {{nombre}})"
               aria-label="Texto a mostrar cuando se cumpla"
               rows={2}
-              className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-indigo-500"
+              className="mt-1.5 w-full rounded-lg border border-input-border bg-surface px-2 py-1.5 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
             />
           </div>
         ))}
@@ -132,19 +132,19 @@ export function CondEditor({
               ],
             }))
           }
-          className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-active"
         >
           <Plus className="h-3.5 w-3.5" /> Añadir otra condición
         </button>
 
-        <label className="block text-xs text-slate-500">
+        <label className="block text-xs text-ink-muted">
           Si no se cumple ninguna, mostrar (opcional):
           <textarea
             value={rule.defaultText ?? ''}
             onChange={(e) => setRule((r) => ({ ...r, defaultText: e.target.value }))}
             placeholder="Dejar en blanco para no mostrar nada"
             rows={2}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-indigo-500"
+            className="mt-1 w-full rounded-lg border border-input-border bg-surface px-2 py-1.5 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
           />
         </label>
       </div>

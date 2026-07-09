@@ -48,17 +48,17 @@ function OAuthCallback() {
   }, [code, state, error, navigate])
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6">
+    <main className="flex min-h-screen items-center justify-center bg-canvas-soft p-6">
+      <div className="w-full max-w-md rounded-xl border border-hairline bg-surface p-6 shadow-e1">
         {failure ? (
           <div className="space-y-4">
             <ErrorNote title={failure.error} hint={failure.hint} />
-            <a href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+            <a href="/" className="text-sm font-medium text-primary hover:text-primary-active">
               ← Volver al generador
             </a>
           </div>
         ) : (
-          <div className="flex items-center gap-3 text-sm text-slate-600">
+          <div className="flex items-center gap-3 text-sm text-ink-muted">
             <Spinner label="Conectando tu cuenta de Google…" />
           </div>
         )}

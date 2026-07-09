@@ -491,24 +491,24 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       <iframe
         ref={iframeRef}
         title="Editor de plantilla"
-        className="h-full w-full rounded-lg border border-slate-300 bg-slate-200"
+        className="h-full w-full rounded-lg border border-hairline bg-[#eceae7]"
       />
 
       {showBlankHelp ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-slate-100/95 p-6">
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-canvas-soft/95 p-6">
           <div className="max-w-md">
-            <h2 className="text-base font-semibold text-slate-800">Tres pasos para tus PDF</h2>
-            <ol className="mt-3 space-y-2 text-sm text-slate-600">
+            <h2 className="text-base font-semibold text-ink">Tres pasos para tus PDF</h2>
+            <ol className="mt-3 space-y-2 text-sm text-ink-muted">
               <li>
-                <strong className="text-slate-800">1.</strong> Pega arriba el enlace de tu documento
+                <strong className="text-ink">1.</strong> Pega arriba el enlace de tu documento
                 de Google y pulsa <strong>Cargar</strong>.
               </li>
               <li>
-                <strong className="text-slate-800">2.</strong> Carga tus datos (enlace de la hoja de
+                <strong className="text-ink">2.</strong> Carga tus datos (enlace de la hoja de
                 Google).
               </li>
               <li>
-                <strong className="text-slate-800">3.</strong> Arrastra las columnas de la izquierda
+                <strong className="text-ink">3.</strong> Arrastra las columnas de la izquierda
                 al documento y pulsa <strong>Generar PDF</strong>.
               </li>
             </ol>
@@ -744,7 +744,7 @@ function MarginRuler({
       aria-valuemin={0}
       aria-valuemax={Number(cm(geom.pageWidth / 2))}
       title={`${side === 'left' ? 'Margen izquierdo' : 'Margen derecho'}: ${cm(padPx)} cm — arrastra para cambiarlo`}
-      className="absolute top-0 z-10 h-0 w-0 cursor-ew-resize touch-none border-l-[7px] border-r-[7px] border-t-[10px] border-l-transparent border-r-transparent border-t-indigo-600 outline-none focus-visible:border-t-indigo-400"
+      className="absolute top-0 z-10 h-0 w-0 cursor-ew-resize touch-none border-l-[7px] border-r-[7px] border-t-[10px] border-l-transparent border-r-transparent border-t-primary outline-none focus-visible:border-t-accent-sky"
       style={{ left: x - 7 }}
       {...markerHandlers(side)}
     />
@@ -753,24 +753,24 @@ function MarginRuler({
   return (
     <div
       ref={rulerRef}
-      className="relative h-5 shrink-0 select-none overflow-hidden rounded border border-slate-200 bg-white"
+      className="relative h-5 shrink-0 select-none overflow-hidden rounded-md border border-hairline bg-surface"
       aria-label="Regla de márgenes (centímetros)"
     >
       {/* Page area + shaded margin zones */}
       <div
-        className="absolute inset-y-0 bg-slate-50"
+        className="absolute inset-y-0 bg-canvas-soft"
         style={{ left: geom.pageLeft, width: geom.pageWidth }}
       />
-      <div className="absolute inset-y-0 bg-indigo-50" style={{ left: geom.pageLeft, width: geom.padL }} />
+      <div className="absolute inset-y-0 bg-primary/10" style={{ left: geom.pageLeft, width: geom.padL }} />
       <div
-        className="absolute inset-y-0 bg-indigo-50"
+        className="absolute inset-y-0 bg-primary/10"
         style={{ left: rightX, width: geom.padR }}
       />
       {ticks.map((t, i) => (
         <div key={i} className="absolute bottom-0" style={{ left: t.x }}>
-          <div className={`w-px bg-slate-400 ${t.label !== null ? 'h-2.5' : 'h-1.5'}`} />
+          <div className={`w-px bg-ink-faint ${t.label !== null ? 'h-2.5' : 'h-1.5'}`} />
           {t.label !== null ? (
-            <span className="absolute bottom-2 left-0 -translate-x-1/2 text-[9px] leading-none text-slate-500">
+            <span className="absolute bottom-2 left-0 -translate-x-1/2 text-[9px] leading-none text-ink-muted">
               {t.label}
             </span>
           ) : null}
@@ -804,13 +804,13 @@ function FormatToolbar({
   }
 
   const iconBtn =
-    'rounded-md p-1.5 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 text-slate-600 hover:bg-slate-100 disabled:opacity-35 disabled:hover:bg-transparent'
+    'rounded-md p-1.5 outline-none focus-visible:ring-2 focus-visible:ring-primary text-ink-secondary hover:bg-black/5 disabled:opacity-35 disabled:hover:bg-transparent'
 
   return (
     <div
       role="toolbar"
       aria-label="Formato del texto"
-      className="relative flex shrink-0 items-center gap-0.5 rounded-lg border border-slate-200 bg-white px-1.5 py-1"
+      className="relative flex shrink-0 items-center gap-0.5 rounded-lg border border-hairline bg-surface px-2 py-1 shadow-e1"
     >
       <button
         onClick={doUndo}
@@ -848,7 +848,7 @@ function FormatToolbar({
       >
         <History className="h-4 w-4" />
       </button>
-      <span className="mx-1 h-4 w-px bg-slate-200" />
+      <span className="mx-1 h-4 w-px bg-hairline" />
 
       {FORMAT_BUTTONS.map((b, i) =>
         b ? (
@@ -860,17 +860,17 @@ function FormatToolbar({
             title={b.label}
             aria-label={b.label}
             aria-pressed={fmt[b.cmd] ?? false}
-            className={`rounded-md p-1.5 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
-              fmt[b.cmd] ? 'bg-indigo-100 text-indigo-700' : 'text-slate-600 hover:bg-slate-100'
+            className={`rounded-md p-1.5 outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+              fmt[b.cmd] ? 'bg-primary/10 text-primary' : 'text-ink-secondary hover:bg-black/5'
             }`}
           >
             <b.Icon className="h-4 w-4" />
           </button>
         ) : (
-          <span key={`sep-${i}`} className="mx-1 h-4 w-px bg-slate-200" />
+          <span key={`sep-${i}`} className="mx-1 h-4 w-px bg-hairline" />
         ),
       )}
-      <span className="ml-2 text-[11px] text-slate-500">
+      <span className="ml-2 text-xs text-ink-faint">
         Selecciona texto en el documento y aplica formato
       </span>
 
@@ -900,30 +900,30 @@ function HistoryPanel({ onClose }: { onClose: () => void }) {
       <div
         role="dialog"
         aria-label="Historial de cambios"
-        className="absolute left-0 top-full z-40 mt-2 max-h-80 w-96 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl"
+        className="absolute left-0 top-full z-40 mt-2 max-h-80 w-96 overflow-y-auto rounded-xl border border-hairline bg-surface p-2 shadow-e2"
       >
-        <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">
           Historial de cambios
         </p>
         {entries.length === 0 ? (
-          <p className="px-2 py-2 text-xs text-slate-500">Sin cambios que deshacer.</p>
+          <p className="px-2 py-2 text-xs text-ink-muted">Sin cambios que deshacer.</p>
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-hairline/60">
             {entries.map((e, i) => (
               <li key={`${e.at}-${i}`}>
                 <button
                   onClick={() => rollBack(i + 1, e.label)}
-                  className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-indigo-50 focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-canvas-soft focus-visible:ring-2 focus-visible:ring-primary"
                   title="Devolver el documento a justo antes de este cambio"
                 >
-                  <span className="truncate text-sm text-slate-700">{e.label}</span>
-                  <span className="shrink-0 text-xs text-slate-500">{timeFmt.format(e.at)}</span>
+                  <span className="truncate text-sm text-ink-secondary">{e.label}</span>
+                  <span className="shrink-0 text-xs text-ink-faint">{timeFmt.format(e.at)}</span>
                 </button>
               </li>
             ))}
           </ul>
         )}
-        <p className="px-2 pb-1 pt-2 text-[11px] text-slate-500">
+        <p className="px-2 pb-1 pt-2 text-[11px] text-ink-faint">
           Clic en un cambio = volver a justo antes de él. Ctrl+Z deshace, Ctrl+Y rehace.
         </p>
       </div>
@@ -948,9 +948,9 @@ function BindFieldPopover({
     <div
       role="dialog"
       aria-label={`Vincular el campo ${tag}`}
-      className="absolute left-1/2 top-4 z-20 w-80 -translate-x-1/2 rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
+      className="absolute left-1/2 top-4 z-20 w-80 -translate-x-1/2 rounded-xl border border-hairline bg-surface p-4 shadow-e2"
     >
-      <p className="mb-2 text-sm text-slate-700">
+      <p className="mb-2 text-sm text-ink-secondary">
         ¿Con qué dato se rellena <strong>{tag}</strong>?
       </p>
       {columns.length > 0 ? (
@@ -960,14 +960,14 @@ function BindFieldPopover({
               key={c}
               onClick={() => onAssign(c)}
               autoFocus={i === 0}
-              className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-sm text-slate-700 outline-none hover:border-indigo-300 hover:bg-indigo-50 focus-visible:ring-2 focus-visible:ring-indigo-500"
+              className="rounded-md bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary outline-none hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-primary"
             >
               {c}
             </button>
           ))}
         </div>
       ) : (
-        <p className="mb-3 text-xs text-slate-500">
+        <p className="mb-3 text-xs text-ink-muted">
           Aún no has cargado los datos. Cárgalos arriba y vuelve a pulsar el campo.
         </p>
       )}

@@ -51,16 +51,16 @@ export function SaveRecipeDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-4" onClick={() => !saving && onClose()}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={() => !saving && onClose()}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Guardar plantilla"
-        className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+        className="w-full max-w-sm rounded-xl border border-hairline bg-surface p-5 shadow-e2"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="text-sm font-semibold text-slate-800">Guardar en la biblioteca</p>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="text-sm font-semibold text-ink">Guardar en la biblioteca</p>
+        <p className="mt-1 text-xs text-ink-muted">
           Se guarda el documento con sus campos, el enlace de los datos, los vínculos y la
           agrupación. Los datos se releen al abrirla.
         </p>

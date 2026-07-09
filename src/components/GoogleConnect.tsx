@@ -66,17 +66,17 @@ export function GoogleConnect({
       {status.connected ? (
         <>
           <span
-            className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent-green/10 px-3 py-1.5 text-xs font-medium text-accent-green"
             title="Los PDF los genera Google Docs con esta cuenta: paginación idéntica al original"
           >
             <CircleCheck className="h-3.5 w-3.5" />
-            Google: {status.email ?? 'conectado'}
+            Google · {status.email ?? 'conectado'}
           </span>
           {!status.canRead ? (
             <button
               onClick={reconnect}
               disabled={busy}
-              className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-full bg-accent-orange/10 px-3 py-1.5 text-xs font-medium text-accent-orange hover:bg-accent-orange/15 disabled:opacity-50"
               title="Tu conexión es anterior al permiso de lectura: reconecta para poder cargar documentos y hojas privados"
             >
               Reconectar (permiso de lectura)
@@ -85,7 +85,7 @@ export function GoogleConnect({
           <button
             onClick={() => setConfirmDisconnect(true)}
             disabled={busy}
-            className="inline-flex items-center gap-1 text-xs text-slate-500 outline-none hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-50"
+            className="inline-flex items-center gap-1 text-xs text-ink-faint outline-none hover:text-ink-secondary focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
             title="Desconectar la cuenta de Google"
           >
             <CloudOff className="h-3.5 w-3.5" /> Desconectar
@@ -95,7 +95,7 @@ export function GoogleConnect({
         <button
           onClick={connect}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-e1 hover:text-primary disabled:opacity-50"
           title="Conecta tu cuenta para que los PDF los genere Google Docs (paginación idéntica al original)"
         >
           <Link2 className="h-3.5 w-3.5" /> Conectar Google
@@ -103,12 +103,12 @@ export function GoogleConnect({
       )}
 
       {error ? (
-        <div className="absolute right-0 top-full z-30 mt-2 w-80 rounded-xl border border-rose-200 bg-white p-3 shadow-xl">
-          <p className="text-xs font-medium text-rose-700">{error.error}</p>
-          {error.hint ? <p className="mt-1 text-xs text-slate-500">{error.hint}</p> : null}
+        <div className="absolute right-0 top-full z-30 mt-2 w-80 rounded-xl border border-red-200 bg-surface p-3 shadow-e2">
+          <p className="text-xs font-medium text-red-700">{error.error}</p>
+          {error.hint ? <p className="mt-1 text-xs text-ink-muted">{error.hint}</p> : null}
           <button
             onClick={() => setError(null)}
-            className="mt-2 text-xs font-medium text-slate-500 outline-none hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="mt-2 text-xs font-medium text-ink-muted outline-none hover:text-ink-secondary focus-visible:ring-2 focus-visible:ring-primary"
           >
             Cerrar
           </button>

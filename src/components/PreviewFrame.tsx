@@ -10,7 +10,7 @@ export function PreviewFrame({ html, className = '' }: { html: string; className
       // Allow same-origin so the document's own CSS applies; no scripts.
       sandbox="allow-same-origin"
       srcDoc={html}
-      className={`w-full rounded-lg border border-slate-200 bg-white ${className}`}
+      className={`w-full rounded-lg border border-hairline bg-white ${className}`}
     />
   )
 }

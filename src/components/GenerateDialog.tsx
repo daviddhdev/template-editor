@@ -61,19 +61,19 @@ export function GenerateDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Generar los documentos"
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-hairline bg-surface p-6 shadow-e2"
       >
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <FileCheck2 className="h-6 w-6 text-indigo-600" />
+            <FileCheck2 className="h-6 w-6 text-primary" />
             <div>
-              <h2 className="text-lg font-semibold text-slate-800">Generar los documentos</h2>
-              <p className="text-sm text-slate-500">
+              <h2 className="text-lg font-semibold text-ink">Generar los documentos</h2>
+              <p className="text-sm text-ink-muted">
                 Se crearán <strong>{jobs.length}</strong> {jobs.length === 1 ? 'documento' : 'documentos'} en
                 PDF.
               </p>
@@ -82,13 +82,13 @@ export function GenerateDialog({
           <button
             onClick={onClose}
             aria-label="Cerrar"
-            className="rounded-md p-1.5 text-slate-500 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="rounded-md p-1.5 text-ink-muted outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-primary"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+        <p className="mb-4 rounded-lg bg-canvas-soft px-3 py-2 text-xs text-ink-muted">
           {viaGoogle ? (
             <>
               Los generará <strong>Google Docs</strong> con tu cuenta
@@ -104,9 +104,9 @@ export function GenerateDialog({
         </p>
 
         {warnings.length > 0 && !result ? (
-          <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div className="text-amber-800">
+          <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-accent-orange/30 bg-accent-orange/5 p-3 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-accent-orange" />
+            <div className="text-accent-orange">
               <p className="font-medium">Hay datos en blanco (saldrán vacíos en el PDF):</p>
               <ul className="mt-1 list-inside list-disc text-xs">
                 {warnings.map((w) => (
@@ -123,17 +123,17 @@ export function GenerateDialog({
         {!result ? (
           <div className="space-y-3">
             {viaGoogle ? (
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
                 <input
                   type="checkbox"
                   checked={withDocx}
                   onChange={(e) => setWithDocx(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 accent-indigo-600"
+                  className="h-4 w-4 rounded border-input-border accent-primary"
                 />
                 Incluir también Word (.docx) editable
               </label>
             ) : (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-ink-muted">
                 El formato Word (.docx) solo está disponible generando con Google (conecta tu
                 cuenta arriba a la derecha).
               </p>
@@ -171,10 +171,10 @@ export function GenerateDialog({
                 <Package className="h-4 w-4" /> Descargar todo (.zip)
               </Button>
             ) : null}
-            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            <ul className="divide-y divide-hairline/60 rounded-lg border border-hairline">
               {result.files.map((f) => (
                 <li key={f.name} className="flex items-center justify-between px-4 py-2.5">
-                  <span className="truncate text-sm text-slate-700">{f.name}</span>
+                  <span className="truncate text-sm text-ink-secondary">{f.name}</span>
                   <Button variant="secondary" onClick={() => downloadDocument(f.name, f.base64)}>
                     <Download className="h-4 w-4" /> Descargar
                   </Button>
