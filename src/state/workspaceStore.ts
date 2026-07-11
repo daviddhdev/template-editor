@@ -104,6 +104,10 @@ interface WorkspaceState {
 
   group: GroupConfig
 
+  /** Drive folder URL (pasted by the user) where generated documents are
+   * uploaded. Per template — saved/restored with the recipe. '' = none. */
+  outputFolderUrl: string
+
   /**
    * Library row this workspace came from or was last saved to (null = never
    * saved). Lets "Guardar" overwrite the existing template instead of always
@@ -137,6 +141,7 @@ interface WorkspaceState {
   unbindRule: (tag: string) => void
 
   setGroup: (patch: Partial<GroupConfig>) => void
+  setOutputFolderUrl: (url: string) => void
   setView: (v: 'edit' | 'preview') => void
 
   /** Record (or clear) the library row this workspace is linked to. */
@@ -219,6 +224,7 @@ export const useWorkspace = create<WorkspaceState>()(
       mapping: {},
       ruleBindings: {},
       group: initialGroup,
+      outputFolderUrl: '',
       savedRecipe: null,
       view: 'edit',
       notice: null,
@@ -294,6 +300,7 @@ export const useWorkspace = create<WorkspaceState>()(
         }),
 
       setGroup: (patch) => set((s) => ({ group: { ...s.group, ...patch } })),
+      setOutputFolderUrl: (outputFolderUrl) => set({ outputFolderUrl }),
       setView: (view) => set({ view }),
 
       setSavedRecipe: (savedRecipe) => set({ savedRecipe }),
@@ -360,6 +367,7 @@ export const useWorkspace = create<WorkspaceState>()(
           mapping: r.mapping,
           ruleBindings: r.ruleBindings ?? {},
           group: r.group,
+          outputFolderUrl: r.outputFolderUrl ?? '',
           savedRecipe: { id: r.id, name: r.name },
           docToken: s.docToken + 1,
           view: 'edit',
@@ -382,6 +390,7 @@ export const useWorkspace = create<WorkspaceState>()(
           mapping: {},
           ruleBindings: {},
           group: initialGroup,
+          outputFolderUrl: '',
           savedRecipe: null,
           view: 'edit',
         })),
@@ -406,6 +415,7 @@ export const useWorkspace = create<WorkspaceState>()(
         mapping: s.mapping,
         ruleBindings: s.ruleBindings,
         group: s.group,
+        outputFolderUrl: s.outputFolderUrl,
         savedRecipe: s.savedRecipe,
       }),
     },

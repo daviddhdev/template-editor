@@ -183,4 +183,7 @@ export interface Recipe {
    * route. Absent in recipes saved before this existed.
    */
   sourceFile?: import('./lib/nativeMerge').SourceFileMeta
+  /** Drive folder URL (pasted by the user) where generated documents are
+   * uploaded. Empty/absent = no Drive upload configured. */
+  outputFolderUrl?: string
 }

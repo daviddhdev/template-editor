@@ -44,19 +44,6 @@ function pruneSourceCache(): void {
   }
 }
 
-/** One retry after a short pause on transient Google errors (429/5xx). */
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn()
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : ''
-    const transient = /\b(429|500|503)\b|rate|quota/i.test(msg)
-    if (!transient) throw err
-    await new Promise((r) => setTimeout(r, 1500))
-    return fn()
-  }
-}
-
 /**
  * The NATIVE generation route: instead of re-importing edited HTML (lossy —
  * flattened page headers, dropped drawings, degraded font weights), the
@@ -131,12 +118,12 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
         // Re-checked per job: a long batch can outlive one access token.
         token = await g.getAccessToken()
         const name = safeName(job.name)
-        const copyId = await withRetry(() => g.uploadAsGoogleDoc(token, name, sourceBytes, uploadMime))
+        const copyId = await g.withRetry(() => g.uploadAsGoogleDoc(token, name, sourceBytes, uploadMime))
         try {
           const flat = job.replacements.flatMap((r) =>
             r.finds.map((find) => ({ tag: r.tag, find, replace: r.replace })),
           )
-          const results = await withRetry(() =>
+          const results = await g.withRetry(() =>
             g.replaceAllTextInDoc(token, copyId, flat.map(({ find, replace }) => ({ find, replace }))),
           )
           // A tag is unmatched only when NONE of its spellings hit (extra
@@ -149,7 +136,7 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
           for (const [tag, count] of hits) if (count === 0) unmatched.add(tag)
 
           for (const format of formats) {
-            const bytes = await withRetry(() =>
+            const bytes = await g.withRetry(() =>
               g.exportFile(
                 token,
                 copyId,

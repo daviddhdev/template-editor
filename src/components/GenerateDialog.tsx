@@ -3,7 +3,9 @@ import {
   AlertTriangle,
   Ban,
   CheckCircle2,
+  CloudUpload,
   Download,
+  ExternalLink,
   FileCheck2,
   Package,
   RotateCw,
@@ -13,9 +15,13 @@ import {
 import { generatePdfFn, type PdfFile, type PdfJob } from '../server/pdf'
 import { generateGooglePdfFn, type GoogleFormat } from '../server/googlePdf'
 import { generateNativePdfFn, type NativeJob } from '../server/googleNative'
+import { driveUploadFn, ensureBatchFolderFn, type BatchFolder } from '../server/driveUpload'
 import type { GoogleStatus } from '../server/google'
 import type { NativeFallbackReason } from '../lib/nativeMerge'
 import { downloadDocument, downloadZip } from '../lib/download'
+import { batchFolderName } from '../lib/fileName'
+import { extractGoogleFolderId } from '../lib/url'
+import { useWorkspace } from '../state/workspaceStore'
 import { Button, Spinner, useDialogChrome } from './ui'
 
 const FALLBACK_EXPLANATION: Record<NativeFallbackReason, string> = {
@@ -38,6 +44,9 @@ interface DocProgress {
   error?: { error: string; hint?: string }
   /** True when this doc was (re)generated through the HTML route. */
   viaHtml?: boolean
+  /** Drive upload sub-state — an upload failure never touches `status`, so
+   * the local download stays available. */
+  upload?: { status: 'uploading' | 'done' | 'error'; error?: { error: string; hint?: string } }
 }
 
 /** One output document with its per-route payloads. */
@@ -71,6 +80,7 @@ export function GenerateDialog({
   nativeFallbackReason = null,
   google,
   warnings = [],
+  batchLabel = '',
   onClose,
 }: {
   jobs: PdfJob[]
@@ -81,12 +91,27 @@ export function GenerateDialog({
   nativeFallbackReason?: NativeFallbackReason | null
   google: GoogleStatus | null
   warnings?: string[]
+  /** Template title, used to name the Drive batch folder. */
+  batchLabel?: string
   onClose: () => void
 }) {
   const [docs, setDocs] = useState<DocProgress[] | null>(null)
   const [running, setRunning] = useState(false)
   const [withDocx, setWithDocx] = useState(false)
+  // Output folder is per template (saved with the recipe); the user pastes its
+  // Drive URL. A template with a folder configured uploads by default.
+  const { outputFolderUrl, setOutputFolderUrl } = useWorkspace()
+  const canWrite = google?.canWrite ?? false
+  const [uploadToDrive, setUploadToDrive] = useState(
+    () => outputFolderUrl.trim() !== '' && canWrite,
+  )
+  const outputFolderId = extractGoogleFolderId(outputFolderUrl)
   const [unmatched, setUnmatched] = useState<string[]>([])
+  /** Batch subfolder in Drive, created lazily on the first upload. The name is
+   * fixed once per batch so a FOLDER_GONE recreation reuses it. */
+  const batchFolderRef = useRef<BatchFolder | null>(null)
+  const batchNameRef = useRef<string | null>(null)
+  const [batchFolder, setBatchFolder] = useState<BatchFolder | null>(null)
   const cancelRef = useRef(false)
   const startRef = useRef(0)
   /** Elapsed ms accumulated across previous runs (pause/resume keeps total). */
@@ -155,6 +180,61 @@ export function GenerateDialog({
     }
   }
 
+  /** Batch subfolder inside the template's output folder, created on first
+   * use (or recreated with `force` after a FOLDER_GONE — same name, so the
+   * batch stays together). */
+  async function ensureFolder(
+    force = false,
+  ): Promise<{ ok: true; folder: BatchFolder } | { ok: false; error: string; hint?: string }> {
+    if (force) batchFolderRef.current = null
+    if (batchFolderRef.current) return { ok: true, folder: batchFolderRef.current }
+    if (!outputFolderId) {
+      return {
+        ok: false,
+        error: 'La URL de la carpeta de Drive no es válida.',
+        hint: 'Pega el enlace de una carpeta (drive.google.com/drive/folders/…).',
+      }
+    }
+    if (!batchNameRef.current) batchNameRef.current = batchFolderName(batchLabel, new Date())
+    const res = await ensureBatchFolderFn({
+      data: { parentFolderId: outputFolderId, batchName: batchNameRef.current },
+    })
+    if (!res.ok) return res
+    batchFolderRef.current = res.data
+    setBatchFolder(res.data)
+    return { ok: true, folder: res.data }
+  }
+
+  /** Upload one document's files to the batch folder (never blocks the local
+   * download: failures only mark the upload sub-state). */
+  async function uploadDoc(i: number, files: PdfFile[]) {
+    patch(i, { upload: { status: 'uploading' } })
+    const fail = (error: string, hint?: string) =>
+      patch(i, { upload: { status: 'error', error: { error, hint } } })
+    try {
+      let folder = await ensureFolder()
+      if (!folder.ok) return fail(folder.error, folder.hint)
+      for (const f of files) {
+        const doc = {
+          name: f.name,
+          base64: f.base64,
+          format: f.name.endsWith('.docx') ? ('docx' as const) : ('pdf' as const),
+        }
+        let res = await driveUploadFn({ data: { ...doc, folderId: folder.folder.folderId } })
+        if (!res.ok && res.code === 'FOLDER_GONE') {
+          // The user deleted the folder mid-batch: recreate once and retry.
+          folder = await ensureFolder(true)
+          if (!folder.ok) return fail(folder.error, folder.hint)
+          res = await driveUploadFn({ data: { ...doc, folderId: folder.folder.folderId } })
+        }
+        if (!res.ok) return fail(res.error, res.hint)
+      }
+      patch(i, { upload: { status: 'done' } })
+    } catch {
+      fail('No se pudo subir a Drive. Comprueba tu conexión e inténtalo de nuevo.')
+    }
+  }
+
   async function runOne(i: number, asHtml: boolean) {
     patch(i, { status: 'running', error: undefined })
     const t0 = Date.now()
@@ -165,6 +245,7 @@ export function GenerateDialog({
         setUnmatched((prev) => [...new Set([...prev, ...res.unmatched!])].sort())
       }
       patch(i, { status: 'done', files: res.files, viaHtml: asHtml || !(viaNative && units[i].nativeJob) })
+      if (uploadToDrive && canWrite) await uploadDoc(i, res.files)
     } else {
       patch(i, { status: 'error', error: { error: res.error, hint: res.hint } })
     }
@@ -181,6 +262,9 @@ export function GenerateDialog({
       durations.current = []
       elapsedBase.current = 0
       setUnmatched([])
+      batchFolderRef.current = null
+      batchNameRef.current = null
+      setBatchFolder(null)
     }
     startRef.current = Date.now()
     for (let i = 0; i < units.length; i++) {
@@ -314,22 +398,74 @@ export function GenerateDialog({
         {!started ? (
           <div className="space-y-3">
             {viaGoogle ? (
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
-                <input
-                  type="checkbox"
-                  checked={withDocx}
-                  onChange={(e) => setWithDocx(e.target.checked)}
-                  className="h-4 w-4 rounded border-input-border accent-primary"
-                />
-                Incluir también Word (.docx) editable
-              </label>
+              <>
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
+                  <input
+                    type="checkbox"
+                    checked={withDocx}
+                    onChange={(e) => setWithDocx(e.target.checked)}
+                    className="h-4 w-4 rounded border-input-border accent-primary"
+                  />
+                  Incluir también Word (.docx) editable
+                </label>
+                <div>
+                  <label
+                    className={`flex items-center gap-2 text-sm text-ink-secondary ${canWrite ? 'cursor-pointer' : 'opacity-60'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={uploadToDrive}
+                      disabled={!canWrite}
+                      onChange={(e) => setUploadToDrive(e.target.checked)}
+                      className="h-4 w-4 rounded border-input-border accent-primary"
+                    />
+                    Subir a una carpeta de Google Drive
+                  </label>
+                  {!canWrite ? (
+                    <p className="ml-6 mt-1 flex items-start gap-1.5 text-xs text-accent-orange">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      Tu conexión de Google no tiene el permiso de escritura en Drive. Usa
+                      «Reconectar» (arriba a la derecha) para concederlo.
+                    </p>
+                  ) : uploadToDrive ? (
+                    <div className="ml-6 mt-1.5 space-y-1">
+                      <input
+                        type="text"
+                        value={outputFolderUrl}
+                        onChange={(e) => setOutputFolderUrl(e.target.value)}
+                        placeholder="https://drive.google.com/drive/folders/…"
+                        className="w-full rounded-md border border-input-border bg-surface px-2.5 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        aria-label="URL de la carpeta de Drive de salida"
+                      />
+                      {outputFolderUrl.trim() !== '' && !outputFolderId ? (
+                        <p className="text-xs text-red-500">
+                          Esa URL no parece de una carpeta de Drive (drive.google.com/drive/folders/…).
+                        </p>
+                      ) : (
+                        <p className="text-xs text-ink-muted">
+                          Carpeta de esta plantilla (se guarda con ella). Cada generación crea una
+                          subcarpeta con la fecha.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </>
             ) : (
               <p className="text-xs text-ink-muted">
                 El formato Word (.docx) solo está disponible generando con Google (conecta tu
                 cuenta arriba a la derecha).
               </p>
             )}
-            <Button onClick={() => run(null)}>
+            <Button
+              onClick={() => run(null)}
+              disabled={uploadToDrive && canWrite && !outputFolderId}
+              title={
+                uploadToDrive && canWrite && !outputFolderId
+                  ? 'Pega la URL de la carpeta de Drive de salida (o desmarca la subida)'
+                  : undefined
+              }
+            >
               <Download className="h-4 w-4" /> Generar {withDocx && viaGoogle ? 'PDF + Word' : 'PDF'}
             </Button>
           </div>
@@ -397,11 +533,37 @@ export function GenerateDialog({
                         <RotateCw className="h-3.5 w-3.5" /> Reintentar
                       </Button>
                     ) : null}
+                    {d.upload?.status === 'uploading' ? (
+                      <span className="flex shrink-0 items-center gap-1.5 text-xs text-ink-muted">
+                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                        Subiendo…
+                      </span>
+                    ) : d.upload?.status === 'done' ? (
+                      <span title="Subido a Drive" className="shrink-0">
+                        <CloudUpload className="h-4 w-4 text-accent-green" />
+                      </span>
+                    ) : d.upload?.status === 'error' && !running ? (
+                      <Button
+                        variant="secondary"
+                        onClick={() => uploadDoc(i, d.files)}
+                        title="Reintentar la subida a Drive"
+                      >
+                        <CloudUpload className="h-3.5 w-3.5" /> Reintentar subida
+                      </Button>
+                    ) : null}
                   </div>
                   {d.status === 'error' && d.error ? (
                     <p className="ml-6 mt-1 text-xs text-red-500">
                       {d.error.error}
                       {d.error.hint ? <span className="text-ink-muted"> {d.error.hint}</span> : null}
+                    </p>
+                  ) : null}
+                  {d.upload?.status === 'error' && d.upload.error ? (
+                    <p className="ml-6 mt-1 text-xs text-red-500">
+                      No se subió a Drive: {d.upload.error.error}
+                      {d.upload.error.hint ? (
+                        <span className="text-ink-muted"> {d.upload.error.hint}</span>
+                      ) : null}
                     </p>
                   ) : null}
                 </li>
@@ -445,6 +607,16 @@ export function GenerateDialog({
                   ) : null}
                 </>
               )}
+              {batchFolder ? (
+                <a
+                  href={batchFolder.folderUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" /> Abrir carpeta en Drive
+                </a>
+              ) : null}
             </div>
           </div>
         )}

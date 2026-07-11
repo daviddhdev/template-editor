@@ -72,14 +72,18 @@ export function GoogleConnect({
             <CircleCheck className="h-3.5 w-3.5" />
             Google · {status.email ?? 'conectado'}
           </span>
-          {!status.canRead ? (
+          {!status.canRead || !status.canWrite ? (
             <button
               onClick={reconnect}
               disabled={busy}
               className="inline-flex items-center gap-1 rounded-full bg-accent-orange/10 px-3 py-1.5 text-xs font-medium text-accent-orange hover:bg-accent-orange/15 disabled:opacity-50"
-              title="Tu conexión es anterior al permiso de lectura: reconecta para poder cargar documentos y hojas privados"
+              title={
+                !status.canRead
+                  ? 'Tu conexión es anterior al permiso de lectura: reconecta para poder cargar documentos y hojas privados'
+                  : 'Tu conexión es anterior al permiso de escritura en Drive: reconecta para poder subir los documentos generados a una carpeta'
+              }
             >
-              Reconectar (permiso de lectura)
+              {!status.canRead ? 'Reconectar (permiso de lectura)' : 'Reconectar (permisos de Drive)'}
             </button>
           ) : null}
           <button

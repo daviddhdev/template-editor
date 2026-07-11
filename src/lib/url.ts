@@ -7,6 +7,15 @@ export function extractGoogleId(link: string): string | null {
   return m ? m[1] : null
 }
 
+/** Extract the folder id from a Drive folder link (or a bare id pasted). */
+export function extractGoogleFolderId(link: string): string | null {
+  const trimmed = link.trim()
+  // .../drive/folders/<ID> and .../drive/u/0/folders/<ID>
+  const m = trimmed.match(/\/folders\/([a-zA-Z0-9_-]{20,})/)
+  if (m) return m[1]
+  return /^[a-zA-Z0-9_-]{20,}$/.test(trimmed) ? trimmed : null
+}
+
 /**
  * Extract the sheet tab gid from a Sheets link. `null` when the link carries
  * none (e.g. copied from the Share button) — that means "first tab", and the

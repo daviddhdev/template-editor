@@ -25,9 +25,14 @@ import { readDotEnv } from './env'
 
 /** drive.file: create/export/delete the app's own temp Docs.
  *  drive.readonly: READ the user's private Docs/Sheets (template + data);
- *  it is also an accepted scope for the Sheets API values endpoints. */
+ *  it is also an accepted scope for the Sheets API values endpoints.
+ *  drive (full): WRITE into a user-chosen output folder — drive.file only
+ *  reaches app-created files, not a folder the user pastes by URL. New
+ *  consents ask for the full scope (it covers the other two); connections
+ *  made before it need a reconnect to upload (see GoogleStatus.canWrite). */
 const READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
-const SCOPES = `https://www.googleapis.com/auth/drive.file ${READ_SCOPE} openid email`
+const FULL_SCOPE = 'https://www.googleapis.com/auth/drive'
+const SCOPES = `${FULL_SCOPE} openid email`
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
 const REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke'
@@ -39,9 +44,12 @@ const DOCS_API = 'https://docs.googleapis.com/v1/documents'
 /** Error with a user-facing message (Spanish) + optional actionable hint. */
 export class GoogleError extends Error {
   hint?: string
-  constructor(message: string, hint?: string) {
+  /** Machine-readable code for errors the client must react to (not just show). */
+  code?: 'FOLDER_GONE'
+  constructor(message: string, hint?: string, code?: 'FOLDER_GONE') {
     super(message)
     this.hint = hint
+    this.code = code
   }
 }
 
@@ -225,15 +233,22 @@ export interface GoogleStatus {
   /** The connection can READ private Docs/Sheets. False on connections made
    * before the read scope existed — the UI offers a reconnect. */
   canRead: boolean
+  /** The connection can WRITE into a user-chosen Drive folder (full drive
+   * scope). False on older connections — the UI offers a reconnect. */
+  canWrite: boolean
   email: string | null
 }
 
 export function getStatus(): GoogleStatus {
+  // Exact-token match: FULL_SCOPE is a prefix of drive.file/drive.readonly,
+  // so a substring check would report write access on old connections.
+  const granted = new Set(readTokens()?.scopes?.split(/\s+/) ?? [])
   const tokens = readTokens()
   return {
     configured: loadConfig() !== null,
     connected: tokens !== null,
-    canRead: tokens?.scopes?.includes(READ_SCOPE) ?? false,
+    canRead: granted.has(READ_SCOPE) || granted.has(FULL_SCOPE),
+    canWrite: granted.has(FULL_SCOPE),
     email: tokens?.email ?? null,
   }
 }
@@ -307,10 +322,16 @@ async function driveError(res: Response, fallback: string): Promise<GoogleError>
           : 'Google Drive API'
       return new GoogleError(fallback, `Activa la "${api}" en tu proyecto de Google Cloud Console.`)
     }
+    if (detail.includes('storageQuotaExceeded') || detail.includes('storage quota')) {
+      return new GoogleError(
+        'Tu Drive no tiene espacio libre.',
+        'Libera espacio o vacía la papelera de Google Drive e inténtalo de nuevo.',
+      )
+    }
     if (detail.toLowerCase().includes('insufficient') || detail.includes('SCOPE')) {
       return new GoogleError(
-        'Tu conexión de Google no tiene el permiso de lectura.',
-        'Desconecta y vuelve a conectar tu cuenta de Google para concederlo.',
+        'Tu conexión de Google no tiene los permisos necesarios.',
+        'Desconecta y vuelve a conectar tu cuenta de Google para concederlos.',
       )
     }
     return new GoogleError(fallback, detail || undefined)
@@ -466,6 +487,108 @@ export async function deleteFile(token: string, fileId: string): Promise<void> {
     method: 'DELETE',
     headers: { authorization: `Bearer ${token}` },
   }).catch(() => {})
+}
+
+// ---------------------------------------------------------------------------
+// Drive: output folder + upload of generated documents
+// ---------------------------------------------------------------------------
+
+const FOLDER_MIME = 'application/vnd.google-apps.folder'
+
+/** Create a Drive folder (at the root when parentId is omitted). */
+export async function createFolder(
+  token: string,
+  name: string,
+  parentId?: string,
+): Promise<string> {
+  const res = await fetch(`${DRIVE_FILES}?fields=id`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json; charset=UTF-8',
+    },
+    body: JSON.stringify({
+      name,
+      mimeType: FOLDER_MIME,
+      ...(parentId ? { parents: [parentId] } : {}),
+    }),
+  })
+  if (!res.ok) throw await driveError(res, 'Google no pudo crear la carpeta en Drive.')
+  const data = (await res.json()) as { id?: string }
+  if (!data.id) throw new GoogleError('Google no devolvió la carpeta creada.')
+  return data.id
+}
+
+/** Whether a remembered folder still exists and is not in the trash. */
+export async function folderAlive(token: string, folderId: string): Promise<boolean> {
+  const res = await fetch(`${DRIVE_FILES}/${folderId}?fields=id,trashed`, {
+    headers: { authorization: `Bearer ${token}` },
+  })
+  if (res.status === 404) return false
+  if (!res.ok) throw await driveError(res, 'Google no pudo comprobar la carpeta de destino.')
+  const data = (await res.json()) as { trashed?: boolean }
+  return data.trashed !== true
+}
+
+/**
+ * Upload a generated document (PDF/DOCX bytes) into a folder, as-is — no
+ * mimeType in the metadata, so Drive stores the binary without converting it.
+ * Same Buffer.concat multipart as uploadAsGoogleDoc (see the note there).
+ */
+export async function uploadBinary(
+  token: string,
+  name: string,
+  bytes: Uint8Array,
+  contentType: string,
+  parentId: string,
+): Promise<string> {
+  const boundary = `ttg${randomBytes(12).toString('hex')}`
+  const head =
+    `--${boundary}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify({ name, parents: [parentId] })}\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: ${contentType}\r\n\r\n`
+  const tail = `\r\n--${boundary}--`
+  const body = Buffer.concat([
+    Buffer.from(head, 'utf8'),
+    Buffer.from(bytes),
+    Buffer.from(tail, 'utf8'),
+  ])
+
+  const res = await fetch(`${DRIVE_UPLOAD}?uploadType=multipart&fields=id`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': `multipart/related; boundary=${boundary}`,
+    },
+    body,
+  })
+  if (res.status === 404) {
+    // The batch folder was deleted mid-run; the client recreates it and retries.
+    throw new GoogleError(
+      'La carpeta de destino en Drive ya no existe.',
+      'Se creará una nueva al reintentar.',
+      'FOLDER_GONE',
+    )
+  }
+  if (!res.ok) throw await driveError(res, 'Google no pudo subir el documento a Drive.')
+  const data = (await res.json()) as { id?: string }
+  if (!data.id) throw new GoogleError('Google no devolvió el documento subido.')
+  return data.id
+}
+
+/** One retry after a short pause on transient Google errors (429/5xx). */
+export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : ''
+    const transient = /\b(429|500|503)\b|rate|quota/i.test(msg)
+    if (!transient) throw err
+    await new Promise((r) => setTimeout(r, 1500))
+    return fn()
+  }
 }
 
 // ---------------------------------------------------------------------------

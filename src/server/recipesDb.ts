@@ -1,7 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import type { Result } from './fetch'
 import type { DataSourceKind, Recipe } from '../types'
-import { requireOneOf, requireRecord, requireString } from './validate'
+import { optionalString, requireOneOf, requireRecord, requireString } from './validate'
 
 /**
  * Template library (recipes) on Postgres — the durable, multi-user-ready home
@@ -55,6 +55,7 @@ function validRecipe(v: unknown): RecipeInput {
     sourceFile: (r.sourceFile === undefined || r.sourceFile === null
       ? undefined
       : requireRecord(r.sourceFile, 'sourceFile')) as RecipeInput['sourceFile'],
+    outputFolderUrl: optionalString(r.outputFolderUrl, 'outputFolderUrl'),
   }
 }
 
@@ -154,6 +155,7 @@ export const getRecipeFn = createServerFn({ method: 'POST' })
           ruleBindings: r.rule_bindings ?? {},
           group: r.group_config,
           sourceFile: r.source_file ?? undefined,
+          outputFolderUrl: r.output_folder_url ?? '',
         },
       }
     } catch (err) {
@@ -173,13 +175,13 @@ export const saveRecipeFn = createServerFn({ method: 'POST' })
       const rows = await sql`
         INSERT INTO recipes (name, template_url, editor_html, editor_css, editor_title,
           editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
-          source_file, thumbnail)
+          source_file, output_folder_url, thumbnail)
         VALUES (${r.name}, ${r.templateUrl}, ${r.editorHtml}, ${r.editorCss}, ${r.editorTitle},
           ${r.editorBodyClass}, ${r.dataKind}, ${r.dataUrl}, ${sql.json(r.mapping)},
           ${sql.json(r.group as unknown as Parameters<typeof sql.json>[0])},
           ${sql.json((r.ruleBindings ?? {}) as unknown as Parameters<typeof sql.json>[0])},
           ${r.sourceFile ? sql.json(r.sourceFile as unknown as Parameters<typeof sql.json>[0]) : null},
-          ${thumbnail ?? null})
+          ${r.outputFolderUrl ?? ''}, ${thumbnail ?? null})
         RETURNING id`
       return { ok: true, data: { id: rows[0].id } }
     } catch (err) {
@@ -208,6 +210,7 @@ export const updateRecipeFn = createServerFn({ method: 'POST' })
           group_config = ${sql.json(r.group as unknown as Parameters<typeof sql.json>[0])},
           rule_bindings = ${sql.json((r.ruleBindings ?? {}) as unknown as Parameters<typeof sql.json>[0])},
           source_file = ${r.sourceFile ? sql.json(r.sourceFile as unknown as Parameters<typeof sql.json>[0]) : null},
+          output_folder_url = ${r.outputFolderUrl ?? ''},
           thumbnail = ${thumbnail ?? null},
           updated_at = now()
         WHERE id = ${data.id}
@@ -252,10 +255,10 @@ export const duplicateRecipeFn = createServerFn({ method: 'POST' })
       const rows = await sql`
         INSERT INTO recipes (name, template_url, editor_html, editor_css, editor_title,
           editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
-          source_file, thumbnail)
+          source_file, output_folder_url, thumbnail)
         SELECT name || ' (copia)', template_url, editor_html, editor_css, editor_title,
           editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
-          source_file, thumbnail
+          source_file, output_folder_url, thumbnail
         FROM recipes WHERE id = ${data.id}
         RETURNING id`
       if (!rows[0]) return { ok: false, error: 'Esa plantilla ya no existe.' }

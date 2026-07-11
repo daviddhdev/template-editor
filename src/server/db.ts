@@ -52,6 +52,8 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE recipes ADD COLUMN source_file jsonb`,
   // Tag -> rule bindings (anchored conditionals / repeatable sections).
   `ALTER TABLE recipes ADD COLUMN rule_bindings jsonb NOT NULL DEFAULT '{}'`,
+  // Drive folder URL where generated documents are uploaded (per template).
+  `ALTER TABLE recipes ADD COLUMN output_folder_url text NOT NULL DEFAULT ''`,
 ]
 
 let client: postgres.Sql | null = null

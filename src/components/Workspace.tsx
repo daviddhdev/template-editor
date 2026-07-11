@@ -290,6 +290,7 @@ export function Workspace() {
           nativeFallbackReason={nativeRoute && !nativeRoute.eligible ? nativeRoute.reason : null}
           google={google}
           warnings={emptyCellWarnings}
+          batchLabel={editorTitle}
           onClose={() => setGenerateOpen(false)}
         />
       ) : null}

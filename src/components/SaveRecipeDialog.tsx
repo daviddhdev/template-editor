@@ -37,6 +37,7 @@ export function SaveRecipeDialog({ onClose }: { onClose: () => void }) {
       ruleBindings: s.ruleBindings,
       group: s.group,
       sourceFile: s.sourceFile ?? undefined,
+      outputFolderUrl: s.outputFolderUrl,
     }
     setSaving(mode)
     setError(null)
