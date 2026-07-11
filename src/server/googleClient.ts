@@ -20,6 +20,8 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { uniqueName } from '../lib/uniqueNames'
+import { readDotEnv } from './env'
 
 /** drive.file: create/export/delete the app's own temp Docs.
  *  drive.readonly: READ the user's private Docs/Sheets (template + data);
@@ -32,6 +34,7 @@ const REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke'
 const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files'
 const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files'
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets'
+const DOCS_API = 'https://docs.googleapis.com/v1/documents'
 
 /** Error with a user-facing message (Spanish) + optional actionable hint. */
 export class GoogleError extends Error {
@@ -52,20 +55,6 @@ interface GoogleConfig {
 }
 
 let cachedConfig: GoogleConfig | null | undefined
-
-/** Minimal KEY=VALUE parser for the project's .env (Vite does not put custom
- * vars into process.env on the server). Quotes and comments tolerated. */
-function readDotEnv(): Record<string, string> {
-  const file = path.resolve(process.cwd(), '.env')
-  if (!existsSync(file)) return {}
-  const out: Record<string, string> = {}
-  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/)
-    if (!m || m[1].startsWith('#')) continue
-    out[m[1]] = m[2].replace(/^["']|["']$/g, '')
-  }
-  return out
-}
 
 export function loadConfig(): GoogleConfig | null {
   if (cachedConfig !== undefined) return cachedConfig
@@ -311,7 +300,11 @@ async function driveError(res: Response, fallback: string): Promise<GoogleError>
   if (res.status === 401) return RECONNECT
   if (res.status === 403) {
     if (detail.includes('has not been used') || detail.includes('is disabled')) {
-      const api = detail.includes('sheets.googleapis.com') ? 'Google Sheets API' : 'Google Drive API'
+      const api = detail.includes('sheets.googleapis.com')
+        ? 'Google Sheets API'
+        : detail.includes('docs.googleapis.com')
+          ? 'Google Docs API'
+          : 'Google Drive API'
       return new GoogleError(fallback, `Activa la "${api}" en tu proyecto de Google Cloud Console.`)
     }
     if (detail.toLowerCase().includes('insufficient') || detail.includes('SCOPE')) {
@@ -332,17 +325,34 @@ async function driveError(res: Response, fallback: string): Promise<GoogleError>
   return new GoogleError(fallback, detail || `Error ${res.status} de Google.`)
 }
 
-/** Upload an HTML document converted to a (temporary) Google Doc. */
-export async function uploadHtmlAsDoc(token: string, name: string, html: string): Promise<string> {
+/**
+ * Upload arbitrary content converted to a (temporary) Google Doc through
+ * Drive's import conversion — the same converter `files.copy` would run, but
+ * the resulting Doc is app-created, so the drive.file scope grants full
+ * write/export/delete on it (no broader scope needed).
+ *
+ * The multipart body is assembled with Buffer.concat: template-string
+ * concatenation would corrupt binary payloads (e.g. DOCX bytes).
+ */
+export async function uploadAsGoogleDoc(
+  token: string,
+  name: string,
+  content: Uint8Array | string,
+  contentType: string,
+): Promise<string> {
   const boundary = `ttg${randomBytes(12).toString('hex')}`
-  const body =
+  const head =
     `--${boundary}\r\n` +
     `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
     `${JSON.stringify({ name, mimeType: 'application/vnd.google-apps.document' })}\r\n` +
     `--${boundary}\r\n` +
-    `Content-Type: text/html; charset=UTF-8\r\n\r\n` +
-    `${html}\r\n` +
-    `--${boundary}--`
+    `Content-Type: ${contentType}\r\n\r\n`
+  const tail = `\r\n--${boundary}--`
+  const body = Buffer.concat([
+    Buffer.from(head, 'utf8'),
+    typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content),
+    Buffer.from(tail, 'utf8'),
+  ])
 
   const res = await fetch(`${DRIVE_UPLOAD}?uploadType=multipart&fields=id`, {
     method: 'POST',
@@ -356,6 +366,71 @@ export async function uploadHtmlAsDoc(token: string, name: string, html: string)
   const data = (await res.json()) as { id?: string }
   if (!data.id) throw new GoogleError('Google no devolvió el documento importado.')
   return data.id
+}
+
+/** Upload an HTML document converted to a (temporary) Google Doc. */
+export async function uploadHtmlAsDoc(token: string, name: string, html: string): Promise<string> {
+  return uploadAsGoogleDoc(token, name, html, 'text/html; charset=UTF-8')
+}
+
+/** Name + mimeType of a Drive file (drive.readonly covers it). */
+export async function getFileMeta(
+  token: string,
+  fileId: string,
+): Promise<{ name: string; mimeType: string }> {
+  const res = await fetch(`${DRIVE_FILES}/${fileId}?fields=name,mimeType`, {
+    headers: { authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw await driveError(res, 'Google no pudo leer el archivo original.')
+  const data = (await res.json()) as { name?: string; mimeType?: string }
+  return { name: data.name ?? 'documento', mimeType: data.mimeType ?? '' }
+}
+
+/** Raw bytes of a NON-native Drive file (e.g. a .docx). Native Google files
+ * have no bytes to download — use exportFile for those. */
+export async function downloadFileBytes(token: string, fileId: string): Promise<Uint8Array> {
+  const res = await fetch(`${DRIVE_FILES}/${fileId}?alt=media`, {
+    headers: { authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw await driveError(res, 'Google no pudo descargar el archivo original.')
+  return new Uint8Array(await res.arrayBuffer())
+}
+
+/**
+ * Substitute literal text across a Google Doc (headers/footers included) with
+ * one documents.batchUpdate call. Needs the Google Docs API enabled; works
+ * under drive.file because the target Doc is app-created.
+ * Returns how many occurrences each find-string replaced (0 = not present).
+ */
+export async function replaceAllTextInDoc(
+  token: string,
+  docId: string,
+  replacements: { find: string; replace: string }[],
+): Promise<{ find: string; occurrences: number }[]> {
+  if (replacements.length === 0) return []
+  const res = await fetch(`${DOCS_API}/${docId}:batchUpdate`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json; charset=UTF-8',
+    },
+    body: JSON.stringify({
+      requests: replacements.map((r) => ({
+        replaceAllText: {
+          containsText: { text: r.find, matchCase: true },
+          replaceText: r.replace,
+        },
+      })),
+    }),
+  })
+  if (!res.ok) throw await driveError(res, 'Google no pudo sustituir los datos en el documento.')
+  const data = (await res.json()) as {
+    replies?: { replaceAllText?: { occurrencesChanged?: number } }[]
+  }
+  return replacements.map((r, i) => ({
+    find: r.find,
+    occurrences: data.replies?.[i]?.replaceAllText?.occurrencesChanged ?? 0,
+  }))
 }
 
 /** Export any Google file (Doc/Sheet) in the requested format via Drive.
@@ -457,9 +532,12 @@ export async function readSheetTable(
   const values = ((await valRes.json()) as { values?: string[][] }).values ?? []
 
   const header = values[0] ?? []
-  const columns = header
-    .map((h, i) => (String(h ?? '').trim() ? String(h).trim() : `Columna ${i + 1}`))
-    .filter((c) => c.length > 0)
+  // Duplicate headers become "Nombre", "Nombre (2)"…: a repeated object key
+  // would silently drop the earlier column's values from every row.
+  const used = new Set<string>()
+  const columns = header.map((h, i) =>
+    uniqueName(used, String(h ?? '').trim() || `Columna ${i + 1}`),
+  )
   if (columns.length === 0) {
     throw new GoogleError('La hoja está vacía o no tiene una fila de encabezados.')
   }

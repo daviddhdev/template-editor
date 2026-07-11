@@ -1,7 +1,17 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import type { DataSourceData, DataSourceKind, GroupConfig, Recipe, TagMapping } from '../types'
+import type {
+  ConditionalRule,
+  DataSourceData,
+  DataSourceKind,
+  GroupConfig,
+  Recipe,
+  RuleBindings,
+  TagMapping,
+} from '../types'
 import type { RawDocument } from '../lib/template/parse'
+import { fingerprintCss, fingerprintHtml } from '../lib/fingerprint'
+import { tagLiterals, type SourceFileMeta } from '../lib/nativeMerge'
 
 /**
  * Single-screen workspace state. Deliberately small: everything that is
@@ -64,6 +74,12 @@ interface WorkspaceState {
   editorBodyClass: string
   /** Bumped whenever a new source doc is loaded, so the canvas re-initialises. */
   docToken: number
+  /**
+   * The imported Drive file behind the document, with fingerprints of the
+   * as-imported state — the gate for the native generation route (see
+   * lib/nativeMerge.ts). Null for blank documents and old recipes.
+   */
+  sourceFile: SourceFileMeta | null
 
   // Data
   dataKind: DataSourceKind
@@ -79,7 +95,21 @@ interface WorkspaceState {
    */
   mapping: TagMapping
 
+  /**
+   * Tags bound to a RULE instead of a column (anchored conditionals /
+   * repeatable sections — see types.ts RuleBinding). A tag lives in `mapping`
+   * OR here, never both.
+   */
+  ruleBindings: RuleBindings
+
   group: GroupConfig
+
+  /**
+   * Library row this workspace came from or was last saved to (null = never
+   * saved). Lets "Guardar" overwrite the existing template instead of always
+   * creating a new one.
+   */
+  savedRecipe: { id: string; name: string } | null
 
   /** Canvas mode: editing the template or previewing resolved documents. */
   view: 'edit' | 'preview'
@@ -89,7 +119,8 @@ interface WorkspaceState {
   noticeToken: number
 
   setTemplateUrl: (url: string) => void
-  loadRawDocument: (raw: RawDocument) => void
+  /** `sourceId` = Drive file id of the imported doc (enables native output). */
+  loadRawDocument: (raw: RawDocument, sourceId?: string | null) => void
   setEditorHtml: (html: string) => void
   /** Page side margins (pt) chosen with the ruler; stored as CSS override. */
   setPageMargins: (leftPt: number, rightPt: number, contentWidthPt: number) => void
@@ -101,9 +132,15 @@ interface WorkspaceState {
 
   assign: (tag: string, column: string | null) => void
   mergeMapping: (m: TagMapping) => void
+  /** Bind a tag to a rule (clears any column binding for it). */
+  bindRule: (tag: string, rule: ConditionalRule, perRow: boolean) => void
+  unbindRule: (tag: string) => void
 
   setGroup: (patch: Partial<GroupConfig>) => void
   setView: (v: 'edit' | 'preview') => void
+
+  /** Record (or clear) the library row this workspace is linked to. */
+  setSavedRecipe: (v: { id: string; name: string } | null) => void
 
   notify: (text: string) => void
   clearNotice: () => void
@@ -125,6 +162,46 @@ interface WorkspaceState {
 
 const initialGroup: GroupConfig = { mode: 'per_row', groupByColumn: null }
 
+/**
+ * localStorage that WARNS when a write fails (quota exceeded): zustand's
+ * persist swallows storage errors, so with a big document (inlined images +
+ * data rows can pass the ~5 MB origin quota) the autosave silently stopped
+ * working while the user kept typing under the assumption it existed.
+ */
+let quotaWarned = false
+function warningStorage(): Storage {
+  return {
+    getItem: (k: string) => localStorage.getItem(k),
+    removeItem: (k: string) => localStorage.removeItem(k),
+    setItem: (k: string, v: string) => {
+      try {
+        localStorage.setItem(k, v)
+        quotaWarned = false
+      } catch {
+        // Swallowed (rethrowing would break the store action that triggered
+        // the save) — but tell the user their safety net is gone.
+        if (!quotaWarned) {
+          quotaWarned = true
+          // Deferred: setItem runs inside a store update; notify() sets state.
+          setTimeout(() => {
+            useWorkspace
+              .getState()
+              .notify(
+                'El documento es demasiado grande para el guardado automático del navegador: usa «Guardar plantilla» para no perder los cambios.',
+              )
+          }, 0)
+        }
+      }
+    },
+    // Unused Storage members, present to satisfy the interface.
+    clear: () => localStorage.clear(),
+    key: (i: number) => localStorage.key(i),
+    get length() {
+      return localStorage.length
+    },
+  }
+}
+
 export const useWorkspace = create<WorkspaceState>()(
   persist(
     (set, get) => ({
@@ -134,24 +211,38 @@ export const useWorkspace = create<WorkspaceState>()(
       editorTitle: 'Plantilla',
       editorBodyClass: '',
       docToken: 0,
+      sourceFile: null,
       dataKind: 'google_sheet',
       dataUrl: '',
       data: null,
       sheetTabs: [],
       mapping: {},
+      ruleBindings: {},
       group: initialGroup,
+      savedRecipe: null,
       view: 'edit',
       notice: null,
       noticeToken: 0,
 
       setTemplateUrl: (templateUrl) => set({ templateUrl }),
-      loadRawDocument: (raw) =>
+      loadRawDocument: (raw, sourceId) =>
         set((s) => ({
           editorHtml: raw.bodyHtml,
           editorCss: raw.css,
           editorTitle: raw.title,
           editorBodyClass: raw.bodyClass,
           docToken: s.docToken + 1,
+          // Fingerprints of the AS-IMPORTED state (the same strings stored
+          // above) so generation can tell "untouched" from "edited in-app",
+          // plus the exact {{tag}} spellings for native replaceAllText.
+          sourceFile: sourceId
+            ? {
+                id: sourceId,
+                fingerprint: fingerprintHtml(raw.bodyHtml),
+                cssFingerprint: fingerprintCss(raw.css),
+                tagLiterals: tagLiterals(raw.bodyHtml),
+              }
+            : null,
           view: 'edit',
           history: pushHistory(s, 'Cargar documento'),
         })),
@@ -178,7 +269,22 @@ export const useWorkspace = create<WorkspaceState>()(
       setData: (data) => set({ data }),
       setSheetTabs: (sheetTabs) => set({ sheetTabs }),
 
-      assign: (tag, column) => set((s) => ({ mapping: { ...s.mapping, [tag]: column } })),
+      assign: (tag, column) =>
+        set((s) => {
+          // A tag is bound to a column OR a rule — never both.
+          const { [tag]: _dropped, ...rest } = s.ruleBindings
+          return { mapping: { ...s.mapping, [tag]: column }, ruleBindings: rest }
+        }),
+      bindRule: (tag, rule, perRow) =>
+        set((s) => ({
+          ruleBindings: { ...s.ruleBindings, [tag]: { rule, perRow } },
+          mapping: { ...s.mapping, [tag]: null },
+        })),
+      unbindRule: (tag) =>
+        set((s) => {
+          const { [tag]: _dropped, ...rest } = s.ruleBindings
+          return { ruleBindings: rest }
+        }),
       mergeMapping: (m) =>
         set((s) => {
           // Fill gaps only; never overwrite an explicit user choice.
@@ -189,6 +295,8 @@ export const useWorkspace = create<WorkspaceState>()(
 
       setGroup: (patch) => set((s) => ({ group: { ...s.group, ...patch } })),
       setView: (view) => set({ view }),
+
+      setSavedRecipe: (savedRecipe) => set({ savedRecipe }),
 
       notify: (notice) => set((s) => ({ notice, noticeToken: s.noticeToken + 1 })),
       clearNotice: () => set({ notice: null }),
@@ -244,12 +352,15 @@ export const useWorkspace = create<WorkspaceState>()(
           editorCss: r.editorCss,
           editorTitle: r.editorTitle,
           editorBodyClass: r.editorBodyClass,
+          sourceFile: r.sourceFile ?? null,
           dataKind: r.dataKind,
           dataUrl: r.dataUrl,
           data: null, // rows are per-batch: reloaded from the source each time
           sheetTabs: [],
           mapping: r.mapping,
+          ruleBindings: r.ruleBindings ?? {},
           group: r.group,
+          savedRecipe: { id: r.id, name: r.name },
           docToken: s.docToken + 1,
           view: 'edit',
         })),
@@ -263,18 +374,21 @@ export const useWorkspace = create<WorkspaceState>()(
           editorTitle: 'Plantilla',
           editorBodyClass: '',
           docToken: s.docToken + 1,
+          sourceFile: null,
           dataKind: 'google_sheet',
           dataUrl: '',
           data: null,
           sheetTabs: [],
           mapping: {},
+          ruleBindings: {},
           group: initialGroup,
+          savedRecipe: null,
           view: 'edit',
         })),
     }),
     {
       name: 'ttg-workspace',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(warningStorage),
       // SSR-safe: Workspace calls rehydrate() in a client effect, then bumps
       // docToken so DocCanvas rewrites the iframe with the restored HTML.
       skipHydration: true,
@@ -284,12 +398,15 @@ export const useWorkspace = create<WorkspaceState>()(
         editorCss: s.editorCss,
         editorTitle: s.editorTitle,
         editorBodyClass: s.editorBodyClass,
+        sourceFile: s.sourceFile,
         dataKind: s.dataKind,
         dataUrl: s.dataUrl,
         data: s.data,
         sheetTabs: s.sheetTabs,
         mapping: s.mapping,
+        ruleBindings: s.ruleBindings,
         group: s.group,
+        savedRecipe: s.savedRecipe,
       }),
     },
   ),

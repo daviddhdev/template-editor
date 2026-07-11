@@ -1,20 +1,15 @@
 import { parse, HTMLElement } from 'node-html-parser'
 import type { BlockType, Template, TemplateBlock } from '../../types'
 import { condTexts, decodeCond } from '../cond'
+import { tagRe } from '../tagRegex'
 
-/**
- * The tag syntax used in templates: {{ campo }}. We tolerate whitespace and,
- * during substitution, inline markup between the braces (Google Docs likes to
- * split a run into several <span>s). Detection works on plain text where the
- * runs are already concatenated.
- */
-const TAG_TEXT_RE = /\{\{\s*([^{}]+?)\s*\}\}/g
-
-/** Unique tag names found in a plain-text string, in first-seen order. */
+/** Unique tag names found in a plain-text string, in first-seen order.
+ * Detection works on plain text where Google's split runs are concatenated;
+ * the tag syntax itself lives in lib/tagRegex.ts. */
 export function detectTags(text: string): string[] {
   const seen = new Set<string>()
   const out: string[] = []
-  for (const m of text.matchAll(TAG_TEXT_RE)) {
+  for (const m of text.matchAll(tagRe())) {
     const name = m[1].trim()
     if (name && !seen.has(name)) {
       seen.add(name)
@@ -68,8 +63,10 @@ function walkBlocks(contentRoot: HTMLElement, accept: Set<string>): TemplateBloc
 
     const outer = child.outerHTML
     const text = child.textContent.replace(/\s+/g, ' ').trim()
-    // A block with no text and no image is skipped (empty spacer paragraphs).
-    if (!text && !/<img/i.test(outer)) continue
+    // A block with no text is skipped (Google's empty spacer paragraphs) —
+    // UNLESS it holds an image or a <br>: a blank line typed with Enter in
+    // the editor is a real line break and must survive into the output.
+    if (!text && !/<img|<br/i.test(outer)) continue
 
     const cond = child.getAttribute('data-cond') ? decodeCond(child.getAttribute('data-cond')!) : null
     // Inline conditionals may hide {{campos}} inside their branch texts (the
@@ -199,4 +196,32 @@ export function buildTemplate(
   const contentRoot = root.querySelector('#__root')!
   const blocks = walkBlocks(contentRoot, EDITOR_BLOCK_TAGS)
   return { sourceUrl, title, css, bodyClass, blocks, tags: uniqueTags(blocks) }
+}
+
+let templateCache: {
+  args: [string, string, string, string, string]
+  template: Template
+} | null = null
+
+/**
+ * buildTemplate behind a last-call cache. Several components derive the
+ * template from the same store strings on every keystroke; parsing a ~1 MB
+ * document once per change (instead of once per component per render) keeps
+ * typing responsive. The comparison is cheap: unchanged store strings keep
+ * their identity, so === short-circuits without scanning.
+ */
+export function buildTemplateCached(
+  bodyHtml: string,
+  css: string,
+  title: string,
+  sourceUrl: string,
+  bodyClass = '',
+): Template {
+  const args: [string, string, string, string, string] = [bodyHtml, css, title, sourceUrl, bodyClass]
+  if (templateCache && templateCache.args.every((a, i) => a === args[i])) {
+    return templateCache.template
+  }
+  const template = buildTemplate(bodyHtml, css, title, sourceUrl, bodyClass)
+  templateCache = { args, template }
+  return template
 }

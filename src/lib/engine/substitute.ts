@@ -1,16 +1,16 @@
-import type { TagMapping } from '../../types'
+import type { RuleBindings, TagMapping } from '../../types'
 import { escapeHtml, stripTags } from '../html'
-
-/**
- * Match a full {{ ... }} occurrence in an HTML string, tolerating inline markup
- * between the braces. Google Docs frequently splits a run so the raw HTML looks
- * like `{{<span>nombre</span>}}`; this still captures it as one tag.
- */
-const TAG_HTML_RE = /\{\{([\s\S]*?)\}\}/g
+import { tagHtmlRe } from '../tagRegex'
+import { resolveBoundTag } from './tagValue'
 
 /** How a preview renders a tag that has no column mapped yet. */
 export function unmappedPlaceholder(tag: string): string {
   return `<mark class="ttg-missing" title="Falta asignar un dato">[${escapeHtml(tag)}]</mark>`
+}
+
+/** A substituted value as inline HTML: escaped, line breaks kept visible. */
+function valueToInlineHtml(value: string): string {
+  return escapeHtml(value).replace(/\n/g, '<br>')
 }
 
 export interface SubstituteOptions {
@@ -23,6 +23,10 @@ export interface SubstituteOptions {
    * 'placeholder' → visible marker (previews); 'empty' → nothing (final output).
    */
   onMissing: 'placeholder' | 'empty'
+  /** Tags bound to rules instead of columns (anchored conditionals/repeats). */
+  ruleBindings?: RuleBindings
+  /** All rows of the current group — what a perRow rule binding repeats over. */
+  groupRows?: Record<string, string>[]
 }
 
 /**
@@ -32,13 +36,22 @@ export interface SubstituteOptions {
  */
 export function substituteTags(html: string, opts: SubstituteOptions): string {
   const { mapping, row, onMissing } = opts
-  return html.replace(TAG_HTML_RE, (_full, inner: string) => {
+  return html.replace(tagHtmlRe(), (_full, inner: string) => {
     const tag = stripTags(inner).trim()
     if (!tag) return ''
+    // Rule-bound tags (anchored conditionals/repeats) resolve to the rule's
+    // text; multiline pieces keep their line breaks in the HTML output.
+    if (opts.ruleBindings) {
+      const bound = resolveBoundTag(tag, opts.groupRows ?? [row], opts.ruleBindings, {
+        mapping,
+        onMissing,
+      })
+      if (bound !== null) return valueToInlineHtml(bound)
+    }
     const column = mapping[tag]
     if (!column || !(column in row)) {
       return onMissing === 'placeholder' ? unmappedPlaceholder(tag) : ''
     }
-    return escapeHtml(row[column] ?? '')
+    return valueToInlineHtml(row[column] ?? '')
   })
 }

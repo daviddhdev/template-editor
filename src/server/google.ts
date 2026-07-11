@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import type { Result } from './fetch'
 import type { GoogleStatus } from './googleClient'
+import { requireRecord, requireString } from './validate'
 
 export type { GoogleStatus }
 
@@ -25,7 +26,9 @@ export const googleStatusFn = createServerFn({ method: 'GET' }).handler(
 
 /** URL of Google's consent screen the browser must navigate to. */
 export const googleAuthUrlFn = createServerFn({ method: 'POST' })
-  .validator((input: { origin: string }) => input)
+  .validator((input: unknown) => ({
+    origin: requireString(requireRecord(input, 'petición').origin, 'origin'),
+  }))
   .handler(async ({ data }): Promise<Result<{ url: string }>> => {
     try {
       const g = await import('./googleClient')
@@ -37,7 +40,10 @@ export const googleAuthUrlFn = createServerFn({ method: 'POST' })
 
 /** Called by the /oauth/callback route with the code Google redirected with. */
 export const googleExchangeFn = createServerFn({ method: 'POST' })
-  .validator((input: { code: string; state: string }) => input)
+  .validator((input: unknown) => {
+    const i = requireRecord(input, 'petición')
+    return { code: requireString(i.code, 'code'), state: requireString(i.state, 'state') }
+  })
   .handler(async ({ data }): Promise<Result<{ email: string | null }>> => {
     try {
       const g = await import('./googleClient')

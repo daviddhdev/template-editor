@@ -3,7 +3,7 @@ import { Download, Eye, FileText, Pencil } from 'lucide-react'
 import { useWorkspace } from '../state/workspaceStore'
 import { fetchDocumentFn } from '../server/fetch'
 import { loadDataIntoWorkspace } from '../lib/loadData'
-import { extractSheetGid, withSheetGid } from '../lib/url'
+import { extractGoogleId, extractSheetGid, withSheetGid } from '../lib/url'
 import type { DataSourceKind } from '../types'
 import { Button, ErrorNote, Spinner } from './ui'
 
@@ -54,7 +54,7 @@ export function TopBar({
     try {
       const res = await fetchDocumentFn({ data: { url: templateUrl.trim() } })
       if (res.ok) {
-        loadRawDocument(res.data)
+        loadRawDocument(res.data, extractGoogleId(templateUrl.trim()))
         notify(`Plantilla cargada: «${res.data.title || 'documento'}».`)
       } else setError(res)
     } catch {
@@ -126,7 +126,7 @@ export function TopBar({
             aria-label="Origen de los datos"
           >
             <option value="google_sheet">Hoja de Google</option>
-            <option value="api_endpoint">API externa</option>
+            <option value="api_endpoint">API externa (próximamente)</option>
           </select>
           <div className="flex h-[38px] min-w-0 flex-1 items-center gap-2 rounded-lg border border-input-border bg-surface px-3 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/10">
             <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">

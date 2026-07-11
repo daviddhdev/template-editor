@@ -1,5 +1,6 @@
 import Papa from 'papaparse'
 import type { DataSourceData } from '../../types'
+import { uniqueName } from '../uniqueNames'
 import { extractGoogleId, extractSheetGid, googleSheetCsvUrl, looksLikeAccessWall } from '../url'
 import type { DataSource } from './types'
 import { DataSourceError } from './types'
@@ -25,9 +26,8 @@ export class GoogleSheetSource implements DataSource {
         'Copia el enlace desde el botón "Compartir" o la barra de direcciones de la hoja.',
       )
     }
-    // No gid in the link = first tab (gid 0), matching Google's own default.
-    const gid = extractSheetGid(this.origin) ?? '0'
-    const url = googleSheetCsvUrl(id, gid)
+    // No gid in the link = first tab, matching the authenticated route.
+    const url = googleSheetCsvUrl(id, extractSheetGid(this.origin))
 
     let res: Response
     try {
@@ -47,10 +47,13 @@ export class GoogleSheetSource implements DataSource {
       )
     }
 
+    // Duplicate headers become "Nombre", "Nombre (2)"…: papaparse would
+    // otherwise keep only the LAST duplicate column's values in each row.
+    const used = new Set<string>()
     const parsed = Papa.parse<Record<string, string>>(body, {
       header: true,
       skipEmptyLines: 'greedy',
-      transformHeader: (h, i) => (h.trim() ? h.trim() : `Columna ${i + 1}`),
+      transformHeader: (h, i) => uniqueName(used, h.trim() || `Columna ${i + 1}`),
     })
 
     const columns = (parsed.meta.fields ?? []).filter((c) => c.length > 0)

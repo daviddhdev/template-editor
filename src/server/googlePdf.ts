@@ -1,11 +1,12 @@
 import { createServerFn } from '@tanstack/react-start'
 import type { Result } from './fetch'
-import { safeName, type PdfFile, type PdfJob, type PdfResult } from './pdf'
+import { safeName, type PdfFile, type PdfResult } from './pdf'
+import { optionalFormats, requirePdfJobs, requireRecord } from './validate'
 
 /** Output formats Google can export the temporary Doc to. */
 export type GoogleFormat = 'pdf' | 'docx'
 
-const FORMAT_MIME: Record<GoogleFormat, string> = {
+export const FORMAT_MIME: Record<GoogleFormat, string> = {
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 }
@@ -19,7 +20,10 @@ const FORMAT_MIME: Record<GoogleFormat, string> = {
  * Google puts them, with no synchronisation tricks: the exact-fidelity path.
  */
 export const generateGooglePdfFn = createServerFn({ method: 'POST' })
-  .validator((input: { jobs: PdfJob[]; formats?: GoogleFormat[] }) => input)
+  .validator((input: unknown) => {
+    const i = requireRecord(input, 'petición')
+    return { jobs: requirePdfJobs(i.jobs), formats: optionalFormats(i.formats) }
+  })
   .handler(async ({ data }): Promise<Result<PdfResult>> => {
     const g = await import('./googleClient')
     const formats: GoogleFormat[] =
@@ -31,7 +35,11 @@ export const generateGooglePdfFn = createServerFn({ method: 'POST' })
         // The page-break markers synced from the source doc only exist to fix
         // Chromium's pagination; Google re-paginates natively, so strip them
         // in case its importer honoured them (that would double the breaks).
-        const html = job.html.replace(/\sdata-page-break="true"/g, '')
+        // Then reinforce inline bold/italic/underline with semantic tags:
+        // Google's importer degrades emphasis carried only as CSS, which
+        // silently dropped formatting applied in the in-app editor.
+        const { emphasizeInlineStyles } = await import('../lib/semanticStyles')
+        const html = emphasizeInlineStyles(job.html.replace(/\sdata-page-break="true"/g, ''))
 
         // Re-checked per job: a long batch can outlive one access token.
         const token = await g.getAccessToken()
@@ -65,14 +73,5 @@ export const generateGooglePdfFn = createServerFn({ method: 'POST' })
       }
     }
 
-    let zipBase64: string | null = null
-    if (files.length > 1) {
-      const JSZip = (await import('jszip')).default
-      const zip = new JSZip()
-      for (const f of files) zip.file(f.name, f.base64, { base64: true })
-      const buf = await zip.generateAsync({ type: 'nodebuffer' })
-      zipBase64 = buf.toString('base64')
-    }
-
-    return { ok: true, data: { files, zipBase64 } }
+    return { ok: true, data: { files } }
   })

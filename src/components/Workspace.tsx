@@ -3,8 +3,10 @@ import { Check, CircleCheck, FileStack, Home, RotateCcw, Save } from 'lucide-rea
 import { Link } from '@tanstack/react-router'
 import { rehydrateStores, useWorkspace } from '../state/workspaceStore'
 import type { GenerationPlan } from '../types'
-import { buildTemplate } from '../lib/template/parse'
-import { effectiveMapping, renderDocuments, unmappedTags } from '../lib/plan'
+import { buildTemplateCached } from '../lib/template/parse'
+import { allPlanTags, effectiveMapping, planGroups, renderDocuments, unmappedTags } from '../lib/plan'
+import { resolveGroupDocument } from '../lib/engine/resolve'
+import { buildNativeJobs, decideNativeRoute } from '../lib/nativeMerge'
 import { googleStatusFn, type GoogleStatus } from '../server/google'
 import { DocCanvas, type DocCanvasHandle } from './DocCanvas'
 import { Palette } from './Palette'
@@ -26,8 +28,10 @@ export function Workspace() {
     editorTitle,
     editorBodyClass,
     templateUrl,
+    sourceFile,
     data,
     mapping,
+    ruleBindings,
     group,
     view,
     notice,
@@ -80,30 +84,41 @@ export function Workspace() {
   }, [])
   useEffect(refreshGoogle, [refreshGoogle])
 
-  // The template is derived on demand from the document HTML — cheap and pure.
+  // The template is derived on demand from the document HTML — pure, and
+  // cached across components so the document parses once per change.
   const template = useMemo(
     () =>
       editorHtml.trim()
-        ? buildTemplate(editorHtml, editorCss, editorTitle, templateUrl || 'editor', editorBodyClass)
+        ? buildTemplateCached(editorHtml, editorCss, editorTitle, templateUrl || 'editor', editorBodyClass)
         : null,
     [editorHtml, editorCss, editorTitle, templateUrl, editorBodyClass],
   )
 
-  const unbound = unmappedTags(template, data?.columns ?? [], mapping)
+  const unbound = unmappedTags(template, data?.columns ?? [], mapping, ruleBindings)
 
   const plan: GenerationPlan | null = useMemo(() => {
     if (!template || !data) return null
     return {
       template,
       data,
-      mapping: effectiveMapping(template.tags, data.columns, mapping),
+      // Rule-text tags need column values too, so map the full tag set.
+      mapping: effectiveMapping(allPlanTags(template, ruleBindings), data.columns, mapping),
+      ruleBindings,
       group,
     }
-  }, [template, data, mapping, group])
+  }, [template, data, mapping, ruleBindings, group])
 
-  const previewDocs = useMemo(
-    () => (view === 'preview' && plan ? renderDocuments(plan, 'placeholder') : []),
+  // Preview: the group LIST is cheap; only the visible document is resolved
+  // (resolving all 500 groups of a big batch froze the tab on every switch).
+  const previewGroups = useMemo(
+    () => (view === 'preview' && plan ? planGroups(plan) : []),
     [view, plan],
+  )
+  const currentGroup =
+    previewGroups[Math.min(previewIndex, Math.max(0, previewGroups.length - 1))] ?? null
+  const currentPreviewHtml = useMemo(
+    () => (plan && currentGroup ? resolveGroupDocument(plan, currentGroup, 'placeholder') : null),
+    [plan, currentGroup],
   )
 
   const generateBlockedReason = !template
@@ -129,13 +144,38 @@ export function Workspace() {
     return warnings
   }, [plan])
 
-  const boundCount = template ? template.tags.length - unbound.length : 0
+  const totalTags = template ? allPlanTags(template, ruleBindings).length : 0
+  const boundCount = totalTags - unbound.length
   const hasWork = Boolean(editorHtml.trim() || data || templateUrl.trim())
 
-  const current = previewDocs[Math.min(previewIndex, Math.max(0, previewDocs.length - 1))]
+  // Generation jobs resolve every group ONCE when the dialog opens (an inline
+  // call would re-resolve the whole batch on every re-render while it's open).
+  const generateJobs = useMemo(
+    () =>
+      generateOpen && plan
+        ? renderDocuments(plan, 'empty').map((d) => ({ name: d.key, html: d.html }))
+        : [],
+    [generateOpen, plan],
+  )
+
+  // Native route (generate from the ORIGINAL Drive file, exact fidelity) is
+  // only decided when the dialog opens: the check normalises the whole
+  // document HTML, too heavy to run on every keystroke. While the modal is
+  // open the document cannot change underneath it.
+  const nativeRoute = useMemo(
+    () => (generateOpen ? decideNativeRoute({ sourceFile, editorHtml, editorCss }) : null),
+    [generateOpen, sourceFile, editorHtml, editorCss],
+  )
+  const native = useMemo(
+    () =>
+      generateOpen && plan && sourceFile && nativeRoute?.eligible
+        ? { sourceFileId: sourceFile.id, jobs: buildNativeJobs(plan, sourceFile.tagLiterals) }
+        : null,
+    [generateOpen, plan, sourceFile, nativeRoute],
+  )
 
   const fieldsState: StepState =
-    !template || template.tags.length === 0 ? 'muted' : unbound.length > 0 ? 'warn' : 'ok'
+    !template || totalTags === 0 ? 'muted' : unbound.length > 0 ? 'warn' : 'ok'
 
   return (
     <div className="mx-auto flex h-screen max-w-[110rem] flex-col gap-3.5 px-5 py-4">
@@ -180,7 +220,7 @@ export function Workspace() {
         <StepJoint done={fieldsState === 'ok'} />
         <StepPill n={3} state={fieldsState}>
           Campos
-          {template && template.tags.length > 0 ? ` · ${boundCount}/${template.tags.length} vinculados` : ''}
+          {template && totalTags > 0 ? ` · ${boundCount}/${totalTags} vinculados` : ''}
         </StepPill>
         <span
           role="status"
@@ -217,7 +257,7 @@ export function Workspace() {
 
           {view === 'preview' ? (
             <div className="flex h-full flex-col gap-2">
-              {previewDocs.length > 1 ? (
+              {previewGroups.length > 1 ? (
                 <label className="flex items-center gap-2 text-sm text-ink-secondary">
                   Ver documento
                   <select
@@ -225,16 +265,16 @@ export function Workspace() {
                     onChange={(e) => setPreviewIndex(Number(e.target.value))}
                     className="max-w-[18rem] rounded-lg border border-hairline bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
                   >
-                    {previewDocs.map((d, i) => (
+                    {previewGroups.map((g, i) => (
                       <option key={i} value={i}>
-                        {d.key} {d.rowCount > 1 ? `(${d.rowCount} filas)` : ''}
+                        {g.key} {g.rows.length > 1 ? `(${g.rows.length} filas)` : ''}
                       </option>
                     ))}
                   </select>
                 </label>
               ) : null}
-              {current ? (
-                <PreviewFrame html={current.html} className="min-h-0 flex-1" />
+              {currentPreviewHtml ? (
+                <PreviewFrame html={currentPreviewHtml} className="min-h-0 flex-1" />
               ) : (
                 <p className="text-sm text-ink-faint">Nada que previsualizar todavía.</p>
               )}
@@ -245,7 +285,9 @@ export function Workspace() {
 
       {generateOpen && plan ? (
         <GenerateDialog
-          jobs={renderDocuments(plan, 'empty').map((d) => ({ name: d.key, html: d.html }))}
+          jobs={generateJobs}
+          native={native}
+          nativeFallbackReason={nativeRoute && !nativeRoute.eligible ? nativeRoute.reason : null}
           google={google}
           warnings={emptyCellWarnings}
           onClose={() => setGenerateOpen(false)}

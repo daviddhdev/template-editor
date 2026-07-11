@@ -1,9 +1,9 @@
 /**
  * Domain model for the visual document generator.
  *
- * Language note: the UI must speak in NON-technical terms. Internally we still
- * use precise names (tag, block, mapping). The mapping between internal names
- * and friendly Spanish labels lives in `src/lib/labels.ts`.
+ * Language note: the UI must speak in NON-technical terms (the components
+ * carry the friendly Spanish wording). Internally we still use precise names
+ * (tag, block, mapping).
  */
 
 /** A single structural block extracted from the template document. */
@@ -70,6 +70,25 @@ export interface DataSourceData {
 /** tag name -> source column name (or null when still unmapped). */
 export type TagMapping = Record<string, string | null>
 
+/**
+ * A document tag bound to a RULE instead of a column (the "anchored" model,
+ * mirroring the team's previous Apps Script flow): the tag's substituted value
+ * is the rule's resolved text. `perRow: false` evaluates once per document
+ * (the group's first row); `perRow: true` evaluates once per row of the group
+ * and joins the pieces with blank lines — a repeatable section anchored at a
+ * single {{tag}} in the source doc, which keeps the NATIVE generation route
+ * viable (replaceAllText can substitute it like any other tag).
+ * Texts inside the rule may reference {{tags}} that resolve to COLUMNS only
+ * (no rule-in-rule nesting).
+ */
+export interface RuleBinding {
+  rule: ConditionalRule
+  perRow: boolean
+}
+
+/** tag name -> rule binding. Lives alongside TagMapping; a tag has one OR the other. */
+export type RuleBindings = Record<string, RuleBinding>
+
 export type ConditionOperator = 'equals' | 'not_equals' | 'contains'
 
 /** One branch of a conditional: "if [column] [op] [value] -> show [text]". */
@@ -131,6 +150,7 @@ export interface GenerationPlan {
   template: Template
   data: DataSourceData
   mapping: TagMapping
+  ruleBindings: RuleBindings
   group: GroupConfig
 }
 
@@ -154,5 +174,13 @@ export interface Recipe {
   dataKind: DataSourceKind
   dataUrl: string
   mapping: TagMapping
+  /** Tag -> rule bindings (anchored conditionals/repeats). Absent in old recipes. */
+  ruleBindings?: RuleBindings
   group: GroupConfig
+  /**
+   * Imported Drive file + as-imported fingerprints (see lib/nativeMerge.ts),
+   * kept so an unedited saved template still generates through the native
+   * route. Absent in recipes saved before this existed.
+   */
+  sourceFile?: import('./lib/nativeMerge').SourceFileMeta
 }

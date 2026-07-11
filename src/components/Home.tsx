@@ -84,11 +84,13 @@ export function HomeScreen() {
         for (const r of legacy) {
           const { id: _id, savedAt: _at, ...input } = r
           const res = await saveRecipeFn({ data: { recipe: input } }).catch(() => null)
-          if (res?.ok) migrated++
-          else break // DB down: keep everything in localStorage, retry next visit
+          if (!res?.ok) break // DB down: the REST stays in localStorage, retried next visit
+          // Drop each recipe as soon as ITS save succeeds: a failure later in
+          // the loop must not re-insert the already-migrated ones next visit.
+          useRecipes.getState().remove(r.id)
+          migrated++
         }
-        if (migrated === legacy.length) {
-          useRecipes.setState({ recipes: [] })
+        if (migrated > 0) {
           notify(
             `${migrated} ${migrated === 1 ? 'plantilla migrada' : 'plantillas migradas'} de este navegador a la base de datos.`,
           )
@@ -317,7 +319,13 @@ export function HomeScreen() {
           onConfirm={async () => {
             const res = await deleteRecipeFn({ data: { id: deleting.id } }).catch(() => null)
             setDeleting(null)
-            if (res?.ok) notify('Plantilla eliminada.')
+            if (res?.ok) {
+              // The draft may be linked to this row: unlink so "Guardar
+              // cambios" doesn't target a template that no longer exists.
+              const ws = useWorkspace.getState()
+              if (ws.savedRecipe?.id === deleting.id) ws.setSavedRecipe(null)
+              notify('Plantilla eliminada.')
+            }
             else setDbError(res ?? { error: 'No se pudo eliminar la plantilla.' })
             await refresh()
           }}
@@ -346,12 +354,13 @@ function CardMenu({
   onRename: () => void
   onDelete: () => void
 }) {
-  useDialogChrome(onClose)
+  const dialogRef = useDialogChrome(onClose)
   const item =
     'flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm text-ink-secondary outline-none hover:bg-canvas-soft focus-visible:ring-2 focus-visible:ring-primary'
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
       <div
+        ref={dialogRef}
         role="dialog"
         aria-label={`Opciones de ${summary.name}`}
         className="w-full max-w-xs rounded-xl border border-hairline bg-surface p-2 shadow-e2"
@@ -384,7 +393,7 @@ function RenameDialog({
   onClose: () => void
   onRenamed: () => void
 }) {
-  useDialogChrome(onClose)
+  const dialogRef = useDialogChrome(onClose)
   const [name, setName] = useState(summary.name)
   const [busy, setBusy] = useState(false)
 
@@ -392,12 +401,20 @@ function RenameDialog({
     setBusy(true)
     const res = await renameRecipeFn({ data: { id: summary.id, name } }).catch(() => null)
     setBusy(false)
-    if (res?.ok) onRenamed()
+    if (res?.ok) {
+      // Keep the linked draft's name in sync (shown by the save dialog).
+      const ws = useWorkspace.getState()
+      if (ws.savedRecipe?.id === summary.id) {
+        ws.setSavedRecipe({ id: summary.id, name: name.trim() || 'Sin nombre' })
+      }
+      onRenamed()
+    }
   }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Renombrar plantilla"

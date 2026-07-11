@@ -3,6 +3,7 @@ import type { DataSourceData, DataSourceKind } from '../types'
 import { createDataSource, DataSourceError } from '../lib/datasource'
 import { extractDocument, type RawDocument } from '../lib/template/parse'
 import { annotatePageBreaks, extractPageStartTexts } from '../lib/template/pageSync'
+import { inlineRemoteImages } from './inlineImages'
 import {
   extractGoogleId,
   extractSheetGid,
@@ -10,6 +11,7 @@ import {
   googleDocPdfExportUrl,
   looksLikeAccessWall,
 } from '../lib/url'
+import { requireOneOf, requireRecord, requireString } from './validate'
 
 /** Discriminated result so the UI can show friendly errors without try/catch. */
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string; hint?: string }
@@ -39,7 +41,10 @@ const RECONNECT_FOR_READ: FetchError = {
  * public export endpoints ("anyone with the link").
  */
 export const fetchDocumentFn = createServerFn({ method: 'POST' })
-  .validator((input: { url: string }) => input)
+  .validator((input: unknown) => {
+    const i = requireRecord(input, 'petición')
+    return { url: requireString(i.url, 'url') }
+  })
   .handler(async ({ data }): Promise<Result<RawDocument>> => {
     const id = extractGoogleId(data.url)
     if (!id) {
@@ -77,6 +82,9 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
             const starts = await extractPageStartTexts(pdfBytes)
             if (starts.length > 0) doc.bodyHtml = annotatePageBreaks(doc.bodyHtml, starts).html
           }
+          // Last mutation before storing: make the document self-contained
+          // (Google's drawing/image URLs are auth-bound and ephemeral).
+          doc.bodyHtml = await inlineRemoteImages(doc.bodyHtml, token)
           return { ok: true, data: doc }
         } catch (err) {
           // Remember why and fall back to the public export: the doc may be
@@ -141,6 +149,12 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
       }
     }
 
+    // Public exports usually serve their images without auth, but a connected
+    // account that can read helps with restricted drawings.
+    const inlineToken =
+      status.connected && status.canRead ? await g.getAccessToken().catch(() => null) : null
+    doc.bodyHtml = await inlineRemoteImages(doc.bodyHtml, inlineToken)
+
     return { ok: true, data: doc }
   })
 
@@ -150,7 +164,13 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
  * `gid` is honoured), falling back to the public CSV export otherwise.
  */
 export const fetchDataFn = createServerFn({ method: 'POST' })
-  .validator((input: { kind: DataSourceKind; origin: string }) => input)
+  .validator((input: unknown) => {
+    const i = requireRecord(input, 'petición')
+    return {
+      kind: requireOneOf<DataSourceKind>(i.kind, ['google_sheet', 'api_endpoint'], 'kind'),
+      origin: requireString(i.origin, 'origin'),
+    }
+  })
   .handler(async ({ data }): Promise<Result<DataSourceData>> => {
     let authError: FetchError | null = null
 
@@ -210,7 +230,10 @@ export interface SheetTab {
  * Connected: Sheets API. Public: parsed from the sheet's htmlview page.
  */
 export const listSheetTabsFn = createServerFn({ method: 'POST' })
-  .validator((input: { origin: string }) => input)
+  .validator((input: unknown) => {
+    const i = requireRecord(input, 'petición')
+    return { origin: requireString(i.origin, 'origin') }
+  })
   .handler(async ({ data }): Promise<Result<SheetTab[]>> => {
     const id = extractGoogleId(data.origin)
     if (!id) return { ok: true, data: [] }

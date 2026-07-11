@@ -5,9 +5,8 @@
  * "docker compose up -d" is the only setup step.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
-import path from 'node:path'
 import postgres from 'postgres'
+import { readDotEnv } from './env'
 
 /** Error with a user-facing message + actionable hint. */
 export class DbError extends Error {
@@ -24,14 +23,10 @@ export const DB_DOWN = new DbError(
 )
 
 function databaseUrl(): string {
-  if (process.env.DATABASE_URL) return process.env.DATABASE_URL
   // Vite does not surface custom .env vars in process.env on the server.
-  const file = path.resolve(process.cwd(), '.env')
-  if (existsSync(file)) {
-    const m = readFileSync(file, 'utf8').match(/^\s*DATABASE_URL\s*=\s*(.+)\s*$/m)
-    if (m) return m[1].replace(/^["']|["']$/g, '')
-  }
-  return 'postgres://ttg:ttg@localhost:5433/ttg'
+  return (
+    process.env.DATABASE_URL ?? readDotEnv().DATABASE_URL ?? 'postgres://ttg:ttg@localhost:5433/ttg'
+  )
 }
 
 /** Numbered migrations; append only — never edit an applied entry. */
@@ -52,6 +47,11 @@ const MIGRATIONS: string[] = [
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
+  // Imported Drive file + as-imported fingerprints (lib/nativeMerge.ts):
+  // lets an unedited saved template keep the native generation route.
+  `ALTER TABLE recipes ADD COLUMN source_file jsonb`,
+  // Tag -> rule bindings (anchored conditionals / repeatable sections).
+  `ALTER TABLE recipes ADD COLUMN rule_bindings jsonb NOT NULL DEFAULT '{}'`,
 ]
 
 let client: postgres.Sql | null = null

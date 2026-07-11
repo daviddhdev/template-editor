@@ -10,38 +10,149 @@ import { useWorkspace } from '../state/workspaceStore'
 import {
   applyCondToElement,
   buildEditorDocument,
+  CARET_ANCHOR,
   decorateFields,
+  decorateTextNodeLive,
+  isAnchorText,
   makeCondElement,
   makeFieldChip,
   undecorateFields,
 } from '../lib/editorHtml'
-import {
-  AlignCenter,
-  AlignJustify,
-  AlignLeft,
-  AlignRight,
-  Bold,
-  History,
-  Italic,
-  Redo2,
-  Underline,
-  Undo2,
-} from 'lucide-react'
 import { decodeCond } from '../lib/cond'
 import { effectiveMapping } from '../lib/plan'
+import { uid } from '../lib/uid'
 import type { ConditionalRule } from '../types'
+import { BindFieldPopover } from './BindFieldPopover'
 import { CondEditor } from './CondEditor'
-import { Button, ConfirmDialog, useDialogChrome } from './ui'
+import { FORMAT_LABEL, FormatToolbar } from './FormatToolbar'
+import { MarginRuler } from './MarginRuler'
+import { Button, ConfirmDialog } from './ui'
 
 /** MIME type used to carry a column name through native drag & drop. */
 export const DRAG_MIME = 'text/ttg-column'
 /** MIME type used to drop a new inline conditional block. */
 export const COND_MIME = 'text/ttg-cond'
 
-function uid(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2)
+/**
+ * Vertical insertion marker shown while dragging over the document. Lives on
+ * `documentElement`, NOT `<body>`, so persist() (which stores body.innerHTML)
+ * never sees it.
+ */
+function dropMarker(doc: Document): HTMLElement {
+  let m = doc.getElementById('ttg-drop-caret')
+  if (!m) {
+    m = doc.createElement('div')
+    m.id = 'ttg-drop-caret'
+    m.className = 'ttg-drop-caret'
+    doc.documentElement.appendChild(m)
+  }
+  return m
+}
+
+function hideDropMarker(doc: Document): void {
+  const m = doc.getElementById('ttg-drop-caret')
+  if (m) m.style.display = 'none'
+}
+
+/** Place the marker at a collapsed range's caret position. */
+function showDropMarker(doc: Document, r: Range): void {
+  // A collapsed range often reports no rect; probe one character around it.
+  let rect: DOMRect | undefined
+  let x: number | undefined
+  const probe = r.cloneRange()
+  if (probe.startContainer.nodeType === Node.TEXT_NODE) {
+    const t = probe.startContainer as Text
+    if (probe.startOffset < t.length) {
+      probe.setEnd(t, probe.startOffset + 1)
+      rect = probe.getClientRects()[0]
+      x = rect?.left
+    } else if (probe.startOffset > 0) {
+      probe.setStart(t, probe.startOffset - 1)
+      rect = probe.getClientRects()[0]
+      x = rect?.right
+    }
+  }
+  if (!rect) {
+    rect = r.getClientRects()[0]
+    x = rect?.left
+  }
+  if (!rect) {
+    const el = (
+      r.startContainer.nodeType === Node.ELEMENT_NODE
+        ? r.startContainer
+        : r.startContainer.parentElement
+    ) as Element | null
+    if (!el) return
+    rect = el.getBoundingClientRect()
+    x = rect.left
+  }
+  const win = doc.defaultView
+  const m = dropMarker(doc)
+  m.style.display = 'block'
+  m.style.left = `${(x ?? rect.left) + (win?.scrollX ?? 0) - 1}px`
+  m.style.top = `${rect.top + (win?.scrollY ?? 0)}px`
+  m.style.height = `${rect.height || 16}px`
+}
+
+/**
+ * The chip immediately beside a collapsed caret (skipping the invisible
+ * caret-anchor text nodes decorateFields puts after chips), or null.
+ * Deleting around contenteditable=false elements is erratic in Chromium —
+ * often a silent no-op — so chip deletion is handled explicitly (see the
+ * keydown listener).
+ */
+function chipBesideCaret(node: Node, offset: number, dir: 'back' | 'fwd'): HTMLElement | null {
+  let probe: Node | null
+  if (node.nodeType === Node.TEXT_NODE) {
+    const data = (node as Text).data
+    const rest = dir === 'back' ? data.slice(0, offset) : data.slice(offset)
+    // Only anchors (or nothing) between the caret and the node edge.
+    if (rest.split(CARET_ANCHOR).join('') !== '') return null
+    probe = dir === 'back' ? node.previousSibling : node.nextSibling
+  } else {
+    const kids = node.childNodes
+    probe = dir === 'back' ? (kids[offset - 1] ?? null) : (kids[offset] ?? null)
+  }
+  while (probe && isAnchorText(probe)) {
+    probe = dir === 'back' ? probe.previousSibling : probe.nextSibling
+  }
+  const el = probe && probe.nodeType === Node.ELEMENT_NODE ? (probe as HTMLElement) : null
+  return el && el.classList.contains('ttg-chip') ? el : null
+}
+
+/** Remove a chip together with the caret anchor that follows it. */
+function removeChip(chip: HTMLElement): void {
+  const next = chip.nextSibling
+  if (next && isAnchorText(next)) next.remove()
+  else if (next && next.nodeType === Node.TEXT_NODE) {
+    ;(next as Text).data = (next as Text).data.replace(new RegExp(`^${CARET_ANCHOR}+`), '')
+  }
+  chip.remove()
+}
+
+/**
+ * Range at a viewport point. Chromium/Safari expose caretRangeFromPoint;
+ * Firefox only has caretPositionFromPoint — without this fallback, dropping
+ * a column on the document silently did nothing there.
+ */
+function rangeFromPoint(doc: Document, x: number, y: number): Range | null {
+  if (typeof doc.caretRangeFromPoint === 'function') {
+    return doc.caretRangeFromPoint(x, y)
+  }
+  const pos = (
+    doc as Document & {
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+    }
+  ).caretPositionFromPoint?.(x, y)
+  if (!pos) return null
+  const r = doc.createRange()
+  try {
+    r.setStart(pos.offsetNode, pos.offset)
+  } catch {
+    return null
+  }
+  r.collapse(true)
+  return r
 }
 
 /** Imperative surface the palette / panels use to act on the document. */
@@ -68,14 +179,33 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
   { className = '' },
   ref,
 ) {
-  const { editorHtml, editorCss, editorBodyClass, docToken, data, mapping, setEditorHtml, assign } =
-    useWorkspace()
+  const {
+    editorHtml,
+    editorCss,
+    editorBodyClass,
+    docToken,
+    data,
+    mapping,
+    ruleBindings,
+    setEditorHtml,
+    assign,
+    bindRule,
+    unbindRule,
+  } = useWorkspace()
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const savedRange = useRef<Range | null>(null)
-  /** Field-binding popover: which chip was clicked. */
-  const [bindTag, setBindTag] = useState<string | null>(null)
+  /** Field-binding popover: which chip was clicked (element kept so the
+   * popover can also REMOVE the field from the document). */
+  const [bindTag, setBindTag] = useState<{ tag: string; el: HTMLElement } | null>(null)
   /** Inline-conditional editor: the .ttg-cond element being edited. */
+  /** Anchored rule being edited for a tag ({{tag}} bound to a rule). */
+  const [bindingRule, setBindingRule] = useState<{
+    tag: string
+    rule: ConditionalRule
+    perRow: boolean
+    existing: boolean
+  } | null>(null)
   const [editingCond, setEditingCond] = useState<{ el: HTMLElement; rule: ConditionalRule } | null>(
     null,
   )
@@ -97,24 +227,183 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
   const editorDoc = () => iframeRef.current?.contentDocument ?? null
   const editorWin = () => iframeRef.current?.contentWindow ?? null
 
-  /** Amber-mark chips whose field name resolves to no column. */
+  /** Amber-mark chips whose field name resolves to no column; teal for rules. */
   const refreshBindings = useCallback(() => {
     const doc = editorDoc()
     if (!doc) return
     const columns = useWorkspace.getState().data?.columns ?? []
     const explicit = useWorkspace.getState().mapping
+    const rules = useWorkspace.getState().ruleBindings
     doc.body.querySelectorAll<HTMLElement>('.ttg-chip').forEach((chip) => {
       const tag = chip.dataset.field ?? ''
       const eff = effectiveMapping([tag], columns, explicit)
-      chip.classList.toggle('ttg-unbound', !eff[tag])
+      chip.classList.toggle('ttg-rulebound', Boolean(rules[tag]))
+      chip.classList.toggle('ttg-unbound', !eff[tag] && !rules[tag])
     })
   }, [])
 
+  /** Pending debounced persist (typing schedules; discrete actions flush). */
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const persist = useCallback(() => {
+    if (persistTimer.current !== null) {
+      clearTimeout(persistTimer.current)
+      persistTimer.current = null
+    }
     const body = editorDoc()?.body
     if (body) setEditorHtml(undecorateFields(body.innerHTML))
     refreshBindings()
   }, [setEditorHtml, refreshBindings])
+
+  /**
+   * Debounced persist for typing: serialising + un-decorating a ~1 MB body on
+   * EVERY keystroke (and re-parsing it downstream) made typing sluggish. The
+   * 300 ms window sits well inside the store's 1.5 s history coalescing, so
+   * undo snapshots are unaffected.
+   */
+  const schedulePersist = useCallback(() => {
+    if (persistTimer.current !== null) clearTimeout(persistTimer.current)
+    persistTimer.current = setTimeout(persist, 300)
+  }, [persist])
+
+  /** Flush a pending debounced persist (no-op when nothing is pending). */
+  const flushPersist = useCallback(() => {
+    if (persistTimer.current !== null) persist()
+  }, [persist])
+
+  /** Checkpoint for a DISCRETE action: the store must hold the latest typed
+   * text first, or undoing the action would also drop those characters. */
+  const checkpointFlushed = useCallback(
+    (label: string) => {
+      flushPersist()
+      useWorkspace.getState().checkpoint(label)
+    },
+    [flushPersist],
+  )
+
+  // Unmount with a pending persist: flush so the last keystrokes survive.
+  useEffect(() => flushPersist, [flushPersist])
+
+  /**
+   * Make hand-typed blocks look like the document: Google's exports carry
+   * their fonts in CSS classes (paragraph classes on <p>, run classes on
+   * <span>), so a fresh block contenteditable inserts (`<p>`/`<div>` with no
+   * class) renders in the browser's default font — fine-looking in the editor
+   * only by accident, wrong in the preview/PDF. When the caret sits in such a
+   * block, copy the previous block's class and wrap bare text in a span
+   * cloned from that block's last styled run. Caret is restored explicitly.
+   */
+  const inheritTypedBlockStyle = useCallback(() => {
+    const doc = editorDoc()
+    const sel = doc?.defaultView?.getSelection()
+    if (!doc || !sel?.anchorNode) return
+    const isRepeatWrapper = (n: Node | null): boolean =>
+      !!n &&
+      n.nodeType === Node.ELEMENT_NODE &&
+      (n as HTMLElement).getAttribute('data-ttg-repeat') === 'true'
+
+    // Nearest block whose parent is the body OR a repeat wrapper — typing
+    // inside a marked section must inherit the document style too (walking
+    // only to body-level used to land on the wrapper itself and give up).
+    let node: Node | null = sel.anchorNode
+    while (node && node.parentNode !== doc.body && !isRepeatWrapper(node.parentNode)) {
+      node = node.parentNode
+    }
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return
+    const block = node as HTMLElement
+    const tag = block.tagName.toLowerCase()
+    if ((tag !== 'p' && tag !== 'div') || block.className || block.hasAttribute('data-cond')) return
+    if (isRepeatWrapper(block)) return
+
+    // Previous CONTENT block with styling: skip editor chrome; a repeat
+    // wrapper as neighbour contributes its LAST block; the first block of a
+    // section looks at the block just before the section.
+    let prev = block.previousElementSibling as HTMLElement | null
+    if (!prev && isRepeatWrapper(block.parentElement)) {
+      prev = block.parentElement!.previousElementSibling as HTMLElement | null
+    }
+    while (prev) {
+      if (isRepeatWrapper(prev)) {
+        prev = prev.lastElementChild as HTMLElement | null
+        continue
+      }
+      if (prev.classList.contains('ttg-cond')) {
+        prev = prev.previousElementSibling as HTMLElement | null
+        continue
+      }
+      if (prev.className || prev.getAttribute('style')) break
+      prev = prev.previousElementSibling as HTMLElement | null
+    }
+    if (!prev) return
+    if (prev.className) block.className = prev.className
+    // Drive-API exports carry the paragraph's geometry as inline style.
+    if (!block.getAttribute('style') && prev.getAttribute('style')) {
+      block.setAttribute('style', prev.getAttribute('style')!)
+    }
+
+    // Reference run: public exports style runs with classes, Drive-API
+    // exports with inline styles — accept either (the FONT lives there, so
+    // without this the typed text falls back to the browser default).
+    const refSpan = Array.from(prev.querySelectorAll<HTMLElement>('span[class], span[style]'))
+      .filter((s) => !s.classList.contains('ttg-chip'))
+      .pop()
+    if (!refSpan) return
+    const caret = { node: sel.anchorNode, offset: sel.anchorOffset }
+    for (const child of Array.from(block.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+        const span = doc.createElement('span')
+        if (refSpan.className) span.className = refSpan.className
+        const st = refSpan.getAttribute('style')
+        if (st) span.setAttribute('style', st)
+        child.replaceWith(span)
+        span.appendChild(child)
+      }
+    }
+    // Re-anchor the caret: moving its text node into the span clears it.
+    try {
+      sel.collapse(caret.node, caret.offset)
+    } catch {
+      /* caret restore is best-effort */
+    }
+  }, [])
+
+  /**
+   * Chip-ify `{{campo}}` the moment it is typed: decorateFields only runs when
+   * the iframe is (re)written, so a hand-typed field would stay plain text
+   * (colourless, hard to tell apart) until the next reload. Scans the block
+   * under the caret and re-anchors the caret after the replacement.
+   */
+  const liveDecorateFields = useCallback(() => {
+    const doc = editorDoc()
+    const sel = doc?.defaultView?.getSelection()
+    if (!doc || !sel?.anchorNode) return
+    let node: Node | null = sel.anchorNode
+    while (node && node.parentNode !== doc.body) node = node.parentNode
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return
+    const block = node as HTMLElement
+    if (block.classList.contains('ttg-cond')) return
+
+    const walker = doc.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+    const texts: Text[] = []
+    let n: Node | null
+    while ((n = walker.nextNode())) {
+      const t = n as Text
+      if (t.parentElement?.closest('.ttg-chip, .ttg-cond')) continue
+      texts.push(t)
+    }
+    const caretNode = sel.anchorNode
+    for (const t of texts) {
+      const hadCaret = t === caretNode
+      const last = decorateTextNodeLive(t, doc)
+      if (last && hadCaret) {
+        const r = doc.createRange()
+        r.setStartAfter(last)
+        r.collapse(true)
+        sel.removeAllRanges()
+        sel.addRange(r)
+      }
+    }
+  }, [])
 
   const saveSelection = useCallback(() => {
     const win = editorWin()
@@ -159,17 +448,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     setFmt(states)
   }, [])
 
-  /** Friendly history labels for the formatting commands. */
-  const FORMAT_LABEL: Record<string, string> = {
-    bold: 'Negrita',
-    italic: 'Cursiva',
-    underline: 'Subrayado',
-    justifyLeft: 'Alineación izquierda',
-    justifyCenter: 'Centrado',
-    justifyRight: 'Alineación derecha',
-    justifyFull: 'Justificado',
-  }
-
   /**
    * Apply an inline/paragraph format to the current selection. The toolbar
    * lives OUTSIDE the iframe, so the saved selection is restored first;
@@ -181,7 +459,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       const doc = editorDoc()
       const win = editorWin()
       if (!doc || !win) return
-      useWorkspace.getState().checkpoint(FORMAT_LABEL[command] ?? 'Formato')
+      checkpointFlushed(FORMAT_LABEL[command] ?? 'Formato')
       win.focus()
       doc.body.focus()
       const sel = win.getSelection()
@@ -189,7 +467,34 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         sel?.removeAllRanges()
         sel?.addRange(savedRange.current)
       }
+
+      // Chips are contenteditable=false, and Chromium refuses to apply
+      // execCommand across a selection containing non-editable elements — so
+      // formatting a phrase WITH a field in it silently did nothing. Unlock
+      // the affected chips for the duration of the command (undecorateFields
+      // preserves the style spans this puts inside them). Boundaries falling
+      // INSIDE a chip are widened so a field is always styled whole.
+      const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null
+      if (range) {
+        const chipOf = (node: Node): HTMLElement | null => {
+          const el = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement
+          return (el?.closest?.('.ttg-chip') as HTMLElement | null) ?? null
+        }
+        const startChip = chipOf(range.startContainer)
+        const endChip = chipOf(range.endContainer)
+        if (startChip) range.setStartBefore(startChip)
+        if (endChip) range.setEndAfter(endChip)
+        for (const chip of doc.body.querySelectorAll<HTMLElement>('.ttg-chip')) {
+          if (range.intersectsNode(chip)) chip.removeAttribute('contenteditable')
+        }
+      }
+
       doc.execCommand(command)
+
+      // Re-lock every chip (also those execCommand may have split/cloned).
+      for (const chip of doc.body.querySelectorAll<HTMLElement>('.ttg-chip')) {
+        chip.setAttribute('contenteditable', 'false')
+      }
 
       // Google's export gives paragraphs their own first-line indent
       // (text-indent) and side margins via CSS classes. text-align:center
@@ -212,7 +517,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       persist()
       refreshFmt()
     },
-    [persist, refreshFmt],
+    [checkpointFlushed, persist, refreshFmt],
   )
 
   const insertFieldAtRange = useCallback(
@@ -275,7 +580,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     const startBlock = topBlockOf(boundaryNode(range.startContainer, range.startOffset))
     const endBlock = topBlockOf(boundaryNode(range.endContainer, range.endOffset, true))
     if (!startBlock) return
-    useWorkspace.getState().checkpoint('Sección repetible')
+    checkpointFlushed('Sección repetible')
 
     // Repeating only has meaning when several rows feed one document. If the
     // user MARKS a section while in per-row mode, ask to switch to per-group
@@ -309,7 +614,14 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
           el.removeAttribute('data-ttg-repeat')
         }
       } else {
-        el.setAttribute('data-ttg-repeat', 'true')
+        // Single block: mark a WRAPPER around it, not the block itself — the
+        // block's own paragraph geometry (Google margins, negative
+        // text-indent) broke the section chrome (label pushed out of the
+        // box, background narrower than the page).
+        const wrapper = doc.createElement('div')
+        wrapper.setAttribute('data-ttg-repeat', 'true')
+        doc.body.insertBefore(wrapper, el)
+        wrapper.appendChild(el)
       }
       persist()
     }
@@ -317,7 +629,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     if (marksNew && useWorkspace.getState().group.mode === 'per_row') {
       setAskGroupMode(true)
     }
-  }, [cursorRange, topBlockOf, boundaryNode, persist])
+  }, [cursorRange, topBlockOf, boundaryNode, checkpointFlushed, persist])
 
   const freshRule = useCallback((): ConditionalRule => {
     const columns = useWorkspace.getState().data?.columns ?? []
@@ -334,7 +646,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     (after: HTMLElement | null) => {
       const doc = editorDoc()
       if (!doc) return
-      useWorkspace.getState().checkpoint('Texto condicional añadido')
+      checkpointFlushed('Texto condicional añadido')
       const rule = freshRule()
       const el = makeCondElement(rule, doc)
       if (after) after.insertAdjacentElement('afterend', el)
@@ -342,7 +654,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       persist()
       setEditingCond({ el, rule })
     },
-    [freshRule, persist],
+    [checkpointFlushed, freshRule, persist],
   )
 
   useImperativeHandle(
@@ -351,7 +663,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       insertField: (name) => {
         editorWin()?.focus()
         editorDoc()?.body.focus()
-        useWorkspace.getState().checkpoint(`Campo «${name.trim()}»`)
+        checkpointFlushed(`Campo «${name.trim()}»`)
         // With no saved cursor the range falls back to the END of the doc,
         // possibly out of view — scroll there and say so (N1 feedback).
         const hadCursor = !!savedRange.current
@@ -366,7 +678,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       toggleRepeat,
       insertConditional: () => insertCondAfter(cursorBlock()),
     }),
-    [cursorRange, insertFieldAtRange, toggleRepeat, insertCondAfter, cursorBlock],
+    [checkpointFlushed, cursorRange, insertFieldAtRange, toggleRepeat, insertCondAfter, cursorBlock],
   )
 
   // (Re)write the iframe whenever a new source doc is loaded, and on mount.
@@ -381,6 +693,8 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     // Inline styles (like Google's export) instead of <b>/<font> wrappers.
     try {
       doc.execCommand('styleWithCSS', false, 'true')
+      // Enter creates <p> (matches the doc's base p{} rule), not <div>.
+      doc.execCommand('defaultParagraphSeparator', false, 'p')
     } catch {
       /* non-blocking */
     }
@@ -397,12 +711,36 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       const k = e.key.toLowerCase()
       if (!(e.ctrlKey || e.metaKey) || (k !== 'z' && k !== 'y')) return
       e.preventDefault()
+      // The undo snapshot must include the keystrokes still in the debounce.
+      flushPersist()
       const st = useWorkspace.getState()
       const label = k === 'y' || (k === 'z' && e.shiftKey) ? st.redo() : st.undo()
       if (label) st.notify(`${k === 'y' || e.shiftKey ? 'Rehecho' : 'Deshecho'}: ${label}`)
     })
 
-    body.addEventListener('input', persist)
+    // Backspace/Delete beside a chip: handled explicitly (Chromium's default
+    // on contenteditable=false neighbours is erratic, often a silent no-op).
+    body.addEventListener('keydown', (e) => {
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return
+      const sel = doc.defaultView?.getSelection()
+      if (!sel || !sel.isCollapsed || !sel.anchorNode) return
+      const chip = chipBesideCaret(
+        sel.anchorNode,
+        sel.anchorOffset,
+        e.key === 'Backspace' ? 'back' : 'fwd',
+      )
+      if (!chip) return
+      e.preventDefault()
+      checkpointFlushed(`Campo «${chip.dataset.field ?? ''}» eliminado`)
+      removeChip(chip)
+      persist()
+    })
+
+    body.addEventListener('input', () => {
+      liveDecorateFields()
+      inheritTypedBlockStyle()
+      schedulePersist()
+    })
     body.addEventListener('keyup', saveSelection)
     body.addEventListener('mouseup', saveSelection)
     body.addEventListener('focusout', persist)
@@ -419,7 +757,13 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         return
       }
       const chip = target?.closest?.('.ttg-chip') as HTMLElement | null
-      if (chip?.dataset.field) setBindTag(chip.dataset.field)
+      if (chip?.dataset.field) {
+        const tag = chip.dataset.field
+        const bound = useWorkspace.getState().ruleBindings[tag]
+        // A rule-bound tag re-opens its rule editor; the rest, the bind popover.
+        if (bound) setBindingRule({ tag, rule: bound.rule, perRow: bound.perRow, existing: true })
+        else setBindTag({ tag, el: chip })
+      }
     })
 
     // Native drag & drop from the palette into the document.
@@ -428,20 +772,28 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       if (!types.includes(DRAG_MIME) && !types.includes(COND_MIME)) return
       e.preventDefault()
       e.dataTransfer!.dropEffect = 'copy'
-      // Move the caret with the pointer so the insertion point is visible.
-      const r = doc.caretRangeFromPoint?.(e.clientX, e.clientY)
+      // Move the caret with the pointer so the insertion point is visible,
+      // and draw an explicit insertion marker (the native caret is easy to
+      // miss while the iframe is unfocused during a drag).
+      const r = rangeFromPoint(doc, e.clientX, e.clientY)
       if (r) {
         const sel = doc.defaultView?.getSelection()
         sel?.removeAllRanges()
         sel?.addRange(r)
+        showDropMarker(doc, r)
       }
     })
+    body.addEventListener('dragleave', (e) => {
+      // relatedTarget null = the pointer left the iframe entirely.
+      if (!e.relatedTarget) hideDropMarker(doc)
+    })
     body.addEventListener('drop', (e) => {
+      hideDropMarker(doc)
       const dt = e.dataTransfer
       if (!dt) return
       if (dt.types.includes(COND_MIME)) {
         e.preventDefault()
-        const r = doc.caretRangeFromPoint?.(e.clientX, e.clientY)
+        const r = rangeFromPoint(doc, e.clientX, e.clientY)
         let block: HTMLElement | null = null
         let node: Node | null = r ? r.commonAncestorContainer : null
         while (node && node.parentNode !== doc.body) node = node.parentNode
@@ -452,9 +804,9 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       const column = dt.getData(DRAG_MIME) || dt.getData('text/plain')
       if (!column) return
       e.preventDefault()
-      const range = doc.caretRangeFromPoint?.(e.clientX, e.clientY)
+      const range = rangeFromPoint(doc, e.clientX, e.clientY)
       if (range) {
-        useWorkspace.getState().checkpoint(`Campo «${column.trim()}»`)
+        checkpointFlushed(`Campo «${column.trim()}»`)
         insertFieldAtRange(column, range)
       }
     })
@@ -470,7 +822,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
   // Re-evaluate chip binding marks when data or explicit bindings change.
   useEffect(() => {
     refreshBindings()
-  }, [data, mapping, refreshBindings])
+  }, [data, mapping, ruleBindings, refreshBindings])
 
   const columns = data?.columns ?? []
 
@@ -521,13 +873,42 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
 
       {bindTag ? (
         <BindFieldPopover
-          tag={bindTag}
+          tag={bindTag.tag}
           columns={columns}
           onAssign={(c) => {
-            assign(bindTag, c)
+            assign(bindTag.tag, c)
+            setBindTag(null)
+          }}
+          onRule={(perRow) => {
+            const tag = bindTag.tag
+            setBindTag(null)
+            setBindingRule({ tag, rule: freshRule(), perRow, existing: false })
+          }}
+          onRemove={() => {
+            checkpointFlushed(`Campo «${bindTag.tag}» eliminado`)
+            removeChip(bindTag.el)
+            persist()
             setBindTag(null)
           }}
           onClose={() => setBindTag(null)}
+        />
+      ) : null}
+
+      {bindingRule ? (
+        <CondEditor
+          key={`bind-${bindingRule.tag}`}
+          initial={bindingRule.rule}
+          columns={columns}
+          perRow={bindingRule.perRow}
+          onSave={(rule, perRow) => {
+            bindRule(bindingRule.tag, rule, perRow)
+            setBindingRule(null)
+          }}
+          onDelete={() => {
+            unbindRule(bindingRule.tag)
+            setBindingRule(null)
+          }}
+          onClose={() => setBindingRule(null)}
         />
       ) : null}
 
@@ -537,13 +918,13 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
           initial={editingCond.rule}
           columns={columns}
           onSave={(rule) => {
-            useWorkspace.getState().checkpoint('Condición editada')
+            checkpointFlushed('Condición editada')
             applyCondToElement(editingCond.el, rule)
             persist()
             setEditingCond(null)
           }}
           onDelete={() => {
-            useWorkspace.getState().checkpoint('Condición eliminada')
+            checkpointFlushed('Condición eliminada')
             editingCond.el.remove()
             persist()
             setEditingCond(null)
@@ -574,408 +955,3 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
   )
 })
 
-/** Formatting commands, in toolbar order. `null` = visual separator. */
-const FORMAT_BUTTONS: ({ cmd: string; label: string; Icon: typeof Bold } | null)[] = [
-  { cmd: 'bold', label: 'Negrita', Icon: Bold },
-  { cmd: 'italic', label: 'Cursiva', Icon: Italic },
-  { cmd: 'underline', label: 'Subrayado', Icon: Underline },
-  null,
-  { cmd: 'justifyLeft', label: 'Alinear a la izquierda', Icon: AlignLeft },
-  { cmd: 'justifyCenter', label: 'Centrar', Icon: AlignCenter },
-  { cmd: 'justifyRight', label: 'Alinear a la derecha', Icon: AlignRight },
-  { cmd: 'justifyFull', label: 'Justificar', Icon: AlignJustify },
-]
-
-/** CSS px per pt inside the iframe (96 dpi), and pt per centimetre. */
-const PX_PER_PT = 4 / 3
-const CM_TO_PT = 28.3465
-
-/**
- * Google-Docs-style horizontal ruler over the canvas. The two draggable
- * triangles set the document's PAGE side margins — i.e. the body padding,
- * which is what the whole pipeline treats as the page margin (server/pdf.ts
- * turns it into real @page margins; Google re-lays it out the same).
- *
- * While dragging, the padding is applied inline on the iframe body (with
- * !important, to beat the stored override) for live feedback; on release the
- * value is committed to the document CSS via setPageMargins, which is what
- * previews, PDFs and saved templates read.
- */
-function MarginRuler({
-  iframeRef,
-  docToken,
-  onCommit,
-}: {
-  iframeRef: React.RefObject<HTMLIFrameElement | null>
-  docToken: number
-  onCommit: (leftPt: number, rightPt: number, contentWidthPt: number) => void
-}) {
-  const rulerRef = useRef<HTMLDivElement>(null)
-  const [geom, setGeom] = useState<{
-    pageLeft: number
-    pageWidth: number
-    padL: number
-    padR: number
-  } | null>(null)
-  const dragSide = useRef<'left' | 'right' | null>(null)
-  /**
-   * Page box frozen at drag start. The page width must stay CONSTANT while a
-   * margin moves (the content narrows instead, via max-width) — recomputing
-   * the reference mid-drag would chase the re-centred page and amplify the
-   * movement.
-   */
-  const dragBase = useRef<{ pageLeft: number; pageWidth: number } | null>(null)
-
-  const measure = useCallback(() => {
-    const doc = iframeRef.current?.contentDocument
-    const body = doc?.body
-    const win = doc?.defaultView
-    if (!doc || !body || !win) return
-    const rect = body.getBoundingClientRect()
-    const cs = win.getComputedStyle(body)
-    setGeom({
-      pageLeft: rect.left,
-      pageWidth: rect.width,
-      padL: parseFloat(cs.paddingLeft) || 0,
-      padR: parseFloat(cs.paddingRight) || 0,
-    })
-  }, [iframeRef])
-
-  // The iframe loads/relayouts outside React's knowledge: poll cheaply.
-  useEffect(() => {
-    measure()
-    const t = setInterval(measure, 500)
-    window.addEventListener('resize', measure)
-    return () => {
-      clearInterval(t)
-      window.removeEventListener('resize', measure)
-    }
-  }, [measure, docToken])
-
-  const roundPt = (px: number) => Math.round((px / PX_PER_PT) * 2) / 2
-
-  /** Apply a margin (ruler px) live: pad grows, content narrows, page fixed. */
-  const applyPad = useCallback(
-    (side: 'left' | 'right', padPx: number) => {
-      const doc = iframeRef.current?.contentDocument
-      const body = doc?.body
-      const win = doc?.defaultView
-      if (!body || !win || !geom) return
-      const base = dragBase.current ?? { pageLeft: geom.pageLeft, pageWidth: geom.pageWidth }
-      const clamped = Math.max(0, Math.min(padPx, base.pageWidth / 2 - 40))
-      const cs = win.getComputedStyle(body)
-      const otherPadPx = parseFloat(side === 'left' ? cs.paddingRight : cs.paddingLeft) || 0
-      const padPt = roundPt(clamped)
-      const contentPt = Math.max(60, roundPt(base.pageWidth) - padPt - roundPt(otherPadPx))
-      body.style.setProperty(
-        side === 'left' ? 'padding-left' : 'padding-right',
-        `${padPt}pt`,
-        'important',
-      )
-      body.style.setProperty('max-width', `${contentPt}pt`, 'important')
-      measure()
-    },
-    [iframeRef, geom, measure],
-  )
-
-  const commit = useCallback(() => {
-    const doc = iframeRef.current?.contentDocument
-    const body = doc?.body
-    const win = doc?.defaultView
-    if (!body || !win) return
-    const cs = win.getComputedStyle(body)
-    const padL = roundPt(parseFloat(cs.paddingLeft) || 0)
-    const padR = roundPt(parseFloat(cs.paddingRight) || 0)
-    const contentPt = Math.max(60, roundPt(body.getBoundingClientRect().width) - padL - padR)
-    onCommit(padL, padR, contentPt)
-  }, [iframeRef, onCommit])
-
-  if (!geom || geom.pageWidth === 0) {
-    return <div className="h-5 shrink-0" aria-hidden />
-  }
-
-  const halfCmPx = (CM_TO_PT * PX_PER_PT) / 2
-  const ticks: { x: number; label: number | null }[] = []
-  for (let i = 0; i * halfCmPx <= geom.pageWidth; i++) {
-    ticks.push({ x: geom.pageLeft + i * halfCmPx, label: i % 2 === 0 && i > 0 ? i / 2 : null })
-  }
-  const leftX = geom.pageLeft + geom.padL
-  const rightX = geom.pageLeft + geom.pageWidth - geom.padR
-  const cm = (px: number) => (px / PX_PER_PT / CM_TO_PT).toFixed(1)
-
-  const markerHandlers = (side: 'left' | 'right') => ({
-    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
-      dragSide.current = side
-      dragBase.current = { pageLeft: geom.pageLeft, pageWidth: geom.pageWidth }
-      // Snapshot BEFORE the live inline changes: undo restores the old margin.
-      useWorkspace.getState().checkpoint('Márgenes de página')
-      e.currentTarget.setPointerCapture(e.pointerId)
-    },
-    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
-      if (dragSide.current !== side || !rulerRef.current || !dragBase.current) return
-      const base = dragBase.current
-      const x = e.clientX - rulerRef.current.getBoundingClientRect().left
-      applyPad(side, side === 'left' ? x - base.pageLeft : base.pageLeft + base.pageWidth - x)
-    },
-    onPointerUp: () => {
-      dragSide.current = null
-      dragBase.current = null
-      commit()
-    },
-    onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
-      e.preventDefault()
-      useWorkspace.getState().checkpoint('Márgenes de página')
-      // 0.25 cm per keypress; the outer edge grows the margin on each side.
-      const step = (CM_TO_PT / 4) * PX_PER_PT * (e.key === 'ArrowRight' ? 1 : -1)
-      const pad = side === 'left' ? geom.padL + step : geom.padR - step
-      applyPad(side, pad)
-      commit()
-    },
-  })
-
-  const marker = (side: 'left' | 'right', x: number, padPx: number) => (
-    <div
-      role="slider"
-      tabIndex={0}
-      aria-label={side === 'left' ? 'Margen izquierdo' : 'Margen derecho'}
-      aria-valuenow={Number(cm(padPx))}
-      aria-valuetext={`${cm(padPx)} cm`}
-      aria-valuemin={0}
-      aria-valuemax={Number(cm(geom.pageWidth / 2))}
-      title={`${side === 'left' ? 'Margen izquierdo' : 'Margen derecho'}: ${cm(padPx)} cm — arrastra para cambiarlo`}
-      className="absolute top-0 z-10 h-0 w-0 cursor-ew-resize touch-none border-l-[7px] border-r-[7px] border-t-[10px] border-l-transparent border-r-transparent border-t-primary outline-none focus-visible:border-t-accent-sky"
-      style={{ left: x - 7 }}
-      {...markerHandlers(side)}
-    />
-  )
-
-  return (
-    <div
-      ref={rulerRef}
-      className="relative h-5 shrink-0 select-none overflow-hidden rounded-md border border-hairline bg-surface"
-      aria-label="Regla de márgenes (centímetros)"
-    >
-      {/* Page area + shaded margin zones */}
-      <div
-        className="absolute inset-y-0 bg-canvas-soft"
-        style={{ left: geom.pageLeft, width: geom.pageWidth }}
-      />
-      <div className="absolute inset-y-0 bg-primary/10" style={{ left: geom.pageLeft, width: geom.padL }} />
-      <div
-        className="absolute inset-y-0 bg-primary/10"
-        style={{ left: rightX, width: geom.padR }}
-      />
-      {ticks.map((t, i) => (
-        <div key={i} className="absolute bottom-0" style={{ left: t.x }}>
-          <div className={`w-px bg-ink-faint ${t.label !== null ? 'h-2.5' : 'h-1.5'}`} />
-          {t.label !== null ? (
-            <span className="absolute bottom-2 left-0 -translate-x-1/2 text-[9px] leading-none text-ink-muted">
-              {t.label}
-            </span>
-          ) : null}
-        </div>
-      ))}
-      {marker('left', leftX, geom.padL)}
-      {marker('right', rightX, geom.padR)}
-    </div>
-  )
-}
-
-/** Bold/italic/underline + alignment over the selection in the editor iframe,
- * plus undo/redo and the change-history panel. */
-function FormatToolbar({
-  fmt,
-  onCommand,
-}: {
-  fmt: Record<string, boolean>
-  onCommand: (cmd: string) => void
-}) {
-  const { history, undo, redo, notify } = useWorkspace()
-  const [historyOpen, setHistoryOpen] = useState(false)
-
-  const doUndo = () => {
-    const label = undo()
-    if (label) notify(`Deshecho: ${label}`)
-  }
-  const doRedo = () => {
-    const label = redo()
-    if (label) notify(`Rehecho: ${label}`)
-  }
-
-  const iconBtn =
-    'rounded-md p-1.5 outline-none focus-visible:ring-2 focus-visible:ring-primary text-ink-secondary hover:bg-black/5 disabled:opacity-35 disabled:hover:bg-transparent'
-
-  return (
-    <div
-      role="toolbar"
-      aria-label="Formato del texto"
-      className="relative flex shrink-0 items-center gap-0.5 rounded-lg border border-hairline bg-surface px-2 py-1 shadow-e1"
-    >
-      <button
-        onClick={doUndo}
-        disabled={history.past.length === 0}
-        title={
-          history.past.length > 0
-            ? `Deshacer: ${history.past.at(-1)!.label} (Ctrl+Z)`
-            : 'Nada que deshacer'
-        }
-        aria-label="Deshacer"
-        className={iconBtn}
-      >
-        <Undo2 className="h-4 w-4" />
-      </button>
-      <button
-        onClick={doRedo}
-        disabled={history.future.length === 0}
-        title={
-          history.future.length > 0
-            ? `Rehacer: ${history.future.at(-1)!.label} (Ctrl+Y)`
-            : 'Nada que rehacer'
-        }
-        aria-label="Rehacer"
-        className={iconBtn}
-      >
-        <Redo2 className="h-4 w-4" />
-      </button>
-      <button
-        onClick={() => setHistoryOpen((v) => !v)}
-        disabled={history.past.length === 0 && history.future.length === 0}
-        title="Historial de cambios"
-        aria-label="Historial de cambios"
-        aria-expanded={historyOpen}
-        className={iconBtn}
-      >
-        <History className="h-4 w-4" />
-      </button>
-      <span className="mx-1 h-4 w-px bg-hairline" />
-
-      {FORMAT_BUTTONS.map((b, i) =>
-        b ? (
-          <button
-            key={b.cmd}
-            // preventDefault: keep the iframe selection alive on click.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onCommand(b.cmd)}
-            title={b.label}
-            aria-label={b.label}
-            aria-pressed={fmt[b.cmd] ?? false}
-            className={`rounded-md p-1.5 outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-              fmt[b.cmd] ? 'bg-primary/10 text-primary' : 'text-ink-secondary hover:bg-black/5'
-            }`}
-          >
-            <b.Icon className="h-4 w-4" />
-          </button>
-        ) : (
-          <span key={`sep-${i}`} className="mx-1 h-4 w-px bg-hairline" />
-        ),
-      )}
-      <span className="ml-2 text-xs text-ink-faint">
-        Selecciona texto en el documento y aplica formato
-      </span>
-
-      {historyOpen ? <HistoryPanel onClose={() => setHistoryOpen(false)} /> : null}
-    </div>
-  )
-}
-
-const timeFmt = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' })
-
-/** Change history: newest first; click an entry to roll back to before it. */
-function HistoryPanel({ onClose }: { onClose: () => void }) {
-  useDialogChrome(onClose)
-  const { history, undo, notify } = useWorkspace()
-  const entries = [...history.past].reverse()
-
-  /** Roll back N steps (entry index 0 = most recent change). */
-  const rollBack = (steps: number, label: string) => {
-    for (let i = 0; i < steps; i++) undo()
-    notify(`Documento devuelto a antes de: ${label}`)
-    onClose()
-  }
-
-  return (
-    <>
-      <div className="fixed inset-0 z-30" onClick={onClose} />
-      <div
-        role="dialog"
-        aria-label="Historial de cambios"
-        className="absolute left-0 top-full z-40 mt-2 max-h-80 w-96 overflow-y-auto rounded-xl border border-hairline bg-surface p-2 shadow-e2"
-      >
-        <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">
-          Historial de cambios
-        </p>
-        {entries.length === 0 ? (
-          <p className="px-2 py-2 text-xs text-ink-muted">Sin cambios que deshacer.</p>
-        ) : (
-          <ul className="divide-y divide-hairline/60">
-            {entries.map((e, i) => (
-              <li key={`${e.at}-${i}`}>
-                <button
-                  onClick={() => rollBack(i + 1, e.label)}
-                  className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-canvas-soft focus-visible:ring-2 focus-visible:ring-primary"
-                  title="Devolver el documento a justo antes de este cambio"
-                >
-                  <span className="truncate text-sm text-ink-secondary">{e.label}</span>
-                  <span className="shrink-0 text-xs text-ink-faint">{timeFmt.format(e.at)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="px-2 pb-1 pt-2 text-[11px] text-ink-faint">
-          Clic en un cambio = volver a justo antes de él. Ctrl+Z deshace, Ctrl+Y rehace.
-        </p>
-      </div>
-    </>
-  )
-}
-
-/** Popover to bind a clicked field chip to a data column. */
-function BindFieldPopover({
-  tag,
-  columns,
-  onAssign,
-  onClose,
-}: {
-  tag: string
-  columns: string[]
-  onAssign: (column: string) => void
-  onClose: () => void
-}) {
-  useDialogChrome(onClose)
-  return (
-    <div
-      role="dialog"
-      aria-label={`Vincular el campo ${tag}`}
-      className="absolute left-1/2 top-4 z-20 w-80 -translate-x-1/2 rounded-xl border border-hairline bg-surface p-4 shadow-e2"
-    >
-      <p className="mb-2 text-sm text-ink-secondary">
-        ¿Con qué dato se rellena <strong>{tag}</strong>?
-      </p>
-      {columns.length > 0 ? (
-        <div className="mb-3 flex flex-wrap gap-1.5">
-          {columns.map((c, i) => (
-            <button
-              key={c}
-              onClick={() => onAssign(c)}
-              autoFocus={i === 0}
-              className="rounded-md bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary outline-none hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="mb-3 text-xs text-ink-muted">
-          Aún no has cargado los datos. Cárgalos arriba y vuelve a pulsar el campo.
-        </p>
-      )}
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose}>
-          Cerrar
-        </Button>
-      </div>
-    </div>
-  )
-}

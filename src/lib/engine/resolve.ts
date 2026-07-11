@@ -1,5 +1,6 @@
 import { parse } from 'node-html-parser'
 import type { GenerationPlan, TemplateBlock } from '../../types'
+import { escapeHtml } from '../html'
 import { decodeCond } from '../cond'
 import { resolveConditional } from './conditionals'
 import type { RowGroup } from './grouping'
@@ -37,8 +38,9 @@ function renderBlockForRow(
   row: Record<string, string>,
   plan: GenerationPlan,
   onMissing: MissingMode,
+  groupRows: Record<string, string>[],
 ): string {
-  const sub = { mapping: plan.mapping, onMissing }
+  const sub = { mapping: plan.mapping, onMissing, ruleBindings: plan.ruleBindings, groupRows }
   if (block.cond) return resolveConditional(block.cond, row, sub)
   return substituteTags(resolveInlineConds(block.html, row, sub), { ...sub, row })
 }
@@ -63,11 +65,11 @@ export function resolveGroupBody(
   for (const block of plan.template.blocks) {
     if (grouped && block.repeat && group.rows.length > 0) {
       const repeated = group.rows
-        .map((row) => renderBlockForRow(block, row, plan, onMissing))
+        .map((row) => renderBlockForRow(block, row, plan, onMissing, group.rows))
         .join('\n')
       parts.push(`<div class="ttg-repeat">${repeated}</div>`)
     } else {
-      parts.push(renderBlockForRow(block, rep, plan, onMissing))
+      parts.push(renderBlockForRow(block, rep, plan, onMissing, group.rows))
     }
   }
   return parts.join('\n')
@@ -124,7 +126,10 @@ function frameStyles(): string {
  * (Playwright), which is what keeps the preview faithful to the final file.
  */
 export function buildDocumentHtml(plan: GenerationPlan, bodyHtml: string): string {
-  const bodyClass = plan.template.bodyClass ? ` class="${plan.template.bodyClass}"` : ''
+  // Escaped: a quote inside the class attribute would break out of it.
+  const bodyClass = plan.template.bodyClass
+    ? ` class="${escapeHtml(plan.template.bodyClass)}"`
+    : ''
   return `<!doctype html>
 <html lang="es">
 <head>

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
-import { AlertCircle, Info, Loader2 } from 'lucide-react'
+import type { ButtonHTMLAttributes } from 'react'
+import { AlertCircle, Loader2 } from 'lucide-react'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
@@ -25,30 +25,6 @@ export function Button({
     >
       {children}
     </button>
-  )
-}
-
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={`rounded-xl border border-hairline bg-surface p-6 shadow-e1 ${className}`}>{children}</div>
-  )
-}
-
-export function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string
-  hint?: string
-  children: ReactNode
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-sm font-medium text-ink-secondary">{label}</span>
-      {children}
-      {hint ? <span className="mt-1 block text-xs text-ink-muted">{hint}</span> : null}
-    </label>
   )
 }
 
@@ -82,36 +58,44 @@ export function ErrorNote({ title, hint }: { title: string; hint?: string }) {
   )
 }
 
-export function InfoNote({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-ink-secondary">
-      <Info className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-      <div>{children}</div>
-    </div>
-  )
-}
-
-export function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'muted'; children: ReactNode }) {
-  const tones = {
-    ok: 'bg-accent-green/10 text-accent-green',
-    warn: 'bg-accent-orange/10 text-accent-orange',
-    muted: 'border border-hairline bg-surface text-ink-faint',
-  }
-  return <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>
-}
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 /**
- * Shared dialog behaviour: close on Escape and return focus to whatever had
- * it before the dialog opened (WCAG 2.1.2 / 2.4.3). Call from any component
- * rendered as a modal/popover.
+ * Shared dialog behaviour: close on Escape, keep Tab cycling INSIDE the
+ * dialog (focus trap — attach the returned ref to the dialog element), and
+ * return focus to whatever had it before the dialog opened
+ * (WCAG 2.1.2 / 2.4.3). Call from any component rendered as a modal/popover.
  */
 export function useDialogChrome(onClose: () => void) {
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeRef.current()
+      if (e.key === 'Escape') {
+        closeRef.current()
+        return
+      }
+      // Tab wraps inside the dialog instead of escaping to the background.
+      if (e.key !== 'Tab' || !dialogRef.current) return
+      const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE))
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement as HTMLElement | null
+      const inside = active !== null && dialogRef.current.contains(active)
+      if (!inside) {
+        e.preventDefault()
+        first.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault()
+        last.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => {
@@ -119,6 +103,7 @@ export function useDialogChrome(onClose: () => void) {
       prev?.focus?.()
     }
   }, [])
+  return dialogRef
 }
 
 /**
@@ -169,13 +154,14 @@ export function ConfirmDialog({
   onConfirm: () => void
   onCancel: () => void
 }) {
-  useDialogChrome(onCancel)
+  const dialogRef = useDialogChrome(onCancel)
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4"
       onClick={onCancel}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}

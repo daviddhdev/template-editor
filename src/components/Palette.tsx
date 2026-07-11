@@ -3,9 +3,21 @@ import { GitBranch, GripVertical, Plus, Repeat, Sparkles } from 'lucide-react'
 import { useWorkspace } from '../state/workspaceStore'
 import { suggestMapping } from '../lib/ai/suggestMapping'
 import { unmappedTags } from '../lib/plan'
-import { buildTemplate } from '../lib/template/parse'
+import { buildTemplateCached } from '../lib/template/parse'
+import type { ConditionalRule } from '../types'
+import { uid } from '../lib/uid'
+import { CondEditor } from './CondEditor'
 import { COND_MIME, DRAG_MIME } from './DocCanvas'
 import type { DocCanvasHandle } from './DocCanvas'
+
+function freshRule(columns: string[]): ConditionalRule {
+  return {
+    id: uid(),
+    label: 'Texto condicional',
+    branches: [{ id: uid(), column: columns[0] ?? '', operator: 'equals', value: '', text: '' }],
+    defaultText: '',
+  }
+}
 
 /**
  * Scratch-style palette: data columns you drag (or click) into the document,
@@ -14,15 +26,33 @@ import type { DocCanvasHandle } from './DocCanvas'
  * account, and auto-synced from the source doc on the local fallback.
  */
 export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | null> }) {
-  const { data, editorHtml, editorCss, editorTitle, editorBodyClass, mapping, mergeMapping, group } =
-    useWorkspace()
+  const {
+    data,
+    editorHtml,
+    editorCss,
+    editorTitle,
+    editorBodyClass,
+    templateUrl,
+    mapping,
+    ruleBindings,
+    mergeMapping,
+    assign,
+    bindRule,
+    group,
+  } = useWorkspace()
   const [customName, setCustomName] = useState('')
+  /** Anchored rule being created for an unbound tag from this list. */
+  const [ruleFor, setRuleFor] = useState<string | null>(null)
 
   const columns = data?.columns ?? []
+  // Cached: shares the parse with Workspace instead of re-parsing per render
+  // (same arguments, INCLUDING sourceUrl, or the shared cache would thrash).
   const template = editorHtml
-    ? buildTemplate(editorHtml, editorCss, editorTitle, 'editor', editorBodyClass)
+    ? buildTemplateCached(editorHtml, editorCss, editorTitle, templateUrl || 'editor', editorBodyClass)
     : null
-  const unbound = unmappedTags(template, columns, mapping)
+  const unbound = unmappedTags(template, columns, mapping, ruleBindings)
+  /** Tags physically present in the document — only these can host a rule. */
+  const docTags = new Set(template?.tags ?? [])
 
   function autoSuggest() {
     // Extension point: heuristic today, a real AI call later (same signature).
@@ -131,10 +161,61 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
       </section>
 
       {unbound.length > 0 ? (
-        <section className="rounded-lg border border-accent-orange/30 bg-accent-orange/5 p-2.5 text-xs text-accent-orange">
-          <strong>{unbound.length}</strong> {unbound.length === 1 ? 'campo necesita' : 'campos necesitan'}{' '}
-          un dato: {unbound.join(', ')}. Haz clic en el campo (en el documento) para elegirlo.
+        <section className="rounded-lg border border-accent-orange/30 bg-accent-orange/5 p-2.5 text-xs">
+          <p className="mb-2 font-medium text-accent-orange">
+            {unbound.length === 1 ? 'Este campo necesita' : 'Estos campos necesitan'} un dato:
+          </p>
+          <ul className="space-y-1.5">
+            {unbound.map((tag) => (
+              <li key={tag} className="flex items-center gap-1.5">
+                <span className="min-w-0 flex-1 truncate font-medium text-ink-secondary" title={tag}>
+                  {tag}
+                </span>
+                <select
+                  value=""
+                  onChange={(e) => e.target.value && assign(tag, e.target.value)}
+                  disabled={columns.length === 0}
+                  aria-label={`Columna para ${tag}`}
+                  className="w-24 rounded-md border border-input-border bg-surface px-1 py-0.5 text-xs text-ink-secondary outline-none focus:border-primary disabled:opacity-40"
+                >
+                  <option value="">columna…</option>
+                  {columns.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                {docTags.has(tag) ? (
+                  <button
+                    onClick={() => setRuleFor(tag)}
+                    title="Rellenar con un texto condicional o una sección repetible"
+                    aria-label={`Vincular ${tag} a una regla`}
+                    className="rounded-md p-1 text-accent-orange outline-none hover:bg-accent-orange/10 focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <GitBranch className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </section>
+      ) : null}
+
+      {ruleFor ? (
+        <div className="fixed inset-0 z-50 bg-black/30">
+          <CondEditor
+            key={`palette-${ruleFor}`}
+            initial={freshRule(columns)}
+            columns={columns}
+            perRow={false}
+            onSave={(rule, perRow) => {
+              bindRule(ruleFor, rule, perRow)
+              setRuleFor(null)
+            }}
+            onDelete={() => setRuleFor(null)}
+            onClose={() => setRuleFor(null)}
+          />
+        </div>
       ) : null}
     </aside>
   )

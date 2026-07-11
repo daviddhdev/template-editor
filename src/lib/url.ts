@@ -37,9 +37,13 @@ export function googleDocPdfExportUrl(id: string): string {
   return `https://docs.google.com/document/d/${id}/export?format=pdf`
 }
 
-/** Public CSV export endpoint for a Google Sheet tab (gviz gives clean CSV). */
-export function googleSheetCsvUrl(id: string, gid: string): string {
-  return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=${gid}`
+/** Public CSV export endpoint for a Google Sheet tab (gviz gives clean CSV).
+ * `gid` null = the link named no tab: omit the parameter so Google serves the
+ * FIRST tab (a hardcoded gid=0 pointed at a tab that may have been deleted,
+ * while the authenticated route already meant "first tab"). */
+export function googleSheetCsvUrl(id: string, gid: string | null): string {
+  const tab = gid === null ? '' : `&gid=${gid}`
+  return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv${tab}`
 }
 
 /** True when the response body looks like a Google sign-in / access wall. */
