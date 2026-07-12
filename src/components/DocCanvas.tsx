@@ -187,10 +187,12 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     data,
     mapping,
     ruleBindings,
+    tagFormats,
     setEditorHtml,
     assign,
     bindRule,
     unbindRule,
+    setTagFormat,
   } = useWorkspace()
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -884,12 +886,20 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
           columns={columns}
           current={effectiveMapping([bindTag.tag], columns, mapping)[bindTag.tag]}
           implicit={!mapping[bindTag.tag]}
+          format={tagFormats[bindTag.tag] ?? null}
           onAssign={(c) => {
+            // First bind keeps the popover open so the format can be picked in
+            // the same visit; changing an existing binding closes as before.
+            const had = Boolean(effectiveMapping([bindTag.tag], columns, mapping)[bindTag.tag])
             assign(bindTag.tag, c)
-            setBindTag(null)
+            if (had) setBindTag(null)
           }}
           onUnassign={() => {
             assign(bindTag.tag, null)
+            setBindTag(null)
+          }}
+          onFormat={(f) => {
+            setTagFormat(bindTag.tag, f)
             setBindTag(null)
           }}
           onRule={(perRow) => {

@@ -1,6 +1,50 @@
 import { describe, expect, it } from 'vitest'
-import { effectiveMapping, missingBoundColumns, unmappedTags } from './plan'
+import { effectiveMapping, formatParseIssues, missingBoundColumns, unmappedTags } from './plan'
 import type { Template } from '../types'
+
+describe('formatParseIssues', () => {
+  const rows = [
+    { FECHA: '12/07/2026', TOTAL: '1.200,50' },
+    { FECHA: 'pendiente', TOTAL: 'n/a' },
+    { FECHA: '', TOTAL: '900' },
+  ]
+  const columns = ['FECHA', 'TOTAL']
+
+  it('cuenta las celdas no parseables (las vacías no cuentan)', () => {
+    const issues = formatParseIssues(
+      { FECHA: 'fecha_larga', TOTAL: 'importe_letra' },
+      {},
+      columns,
+      rows,
+    )
+    expect(issues).toEqual([
+      { column: 'FECHA', format: 'fecha_larga', kind: 'date', bad: 1, example: 'pendiente' },
+      { column: 'TOTAL', format: 'importe_letra', kind: 'number', bad: 1, example: 'n/a' },
+    ])
+  })
+
+  it('sin problemas cuando todo parsea o el formato es de texto', () => {
+    expect(formatParseIssues({ FECHA: 'mayusculas' }, {}, columns, rows)).toEqual([])
+    expect(
+      formatParseIssues({ TOTAL: 'moneda' }, {}, columns, [{ TOTAL: '5' }, { TOTAL: '' }]),
+    ).toEqual([])
+  })
+
+  it('usa el mapeo efectivo (vínculo explícito) y deduplica columna+formato', () => {
+    const issues = formatParseIssues(
+      { IMPORTE: 'moneda', CUANTIA: 'moneda' },
+      { IMPORTE: 'TOTAL', CUANTIA: 'TOTAL' },
+      columns,
+      rows,
+    )
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toMatchObject({ column: 'TOTAL', format: 'moneda', bad: 1 })
+  })
+
+  it('ignora tags con formato cuyo vínculo no resuelve a columna', () => {
+    expect(formatParseIssues({ SUELTO: 'fecha_larga' }, {}, columns, rows)).toEqual([])
+  })
+})
 
 describe('effectiveMapping', () => {
   it('binds by identity when the tag IS a column', () => {

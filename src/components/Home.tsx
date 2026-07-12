@@ -23,7 +23,7 @@ import {
   saveRecipeFn,
   type RecipeSummary,
 } from '../server/recipesDb'
-import { loadDataIntoWorkspace, missingColumnsNotice } from '../lib/loadData'
+import { formatIssuesNotice, loadDataIntoWorkspace, missingColumnsNotice } from '../lib/loadData'
 import { authGuard } from '../lib/authRedirect'
 import { googleStatusFn, type GoogleStatus } from '../server/google'
 import { GenerationHistory } from './GenerationHistory'
@@ -136,7 +136,8 @@ export function HomeScreen() {
           const tab = dataRes.multiTab && dataRes.tabTitle ? ` (pestaña «${dataRes.tabTitle}»)` : ''
           notify(
             `Plantilla lista: ${dataRes.rows} filas de datos${tab}.` +
-              missingColumnsNotice(dataRes.missingColumns),
+              missingColumnsNotice(dataRes.missingColumns) +
+              formatIssuesNotice(dataRes.formatIssues),
           )
         } else {
           notify(`Plantilla abierta, pero los datos no: ${dataRes.error}`)

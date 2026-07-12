@@ -1,6 +1,7 @@
-import type { RuleBindings, TagMapping } from '../../types'
+import type { RuleBindings, TagFormats, TagMapping } from '../../types'
 import { escapeHtml, stripTags } from '../html'
 import { tagHtmlRe } from '../tagRegex'
+import { formatTagValue } from './format'
 import { resolveBoundTag } from './tagValue'
 
 /** How a preview renders a tag that has no column mapped yet. */
@@ -27,6 +28,8 @@ export interface SubstituteOptions {
   ruleBindings?: RuleBindings
   /** All rows of the current group — what a perRow rule binding repeats over. */
   groupRows?: Record<string, string>[]
+  /** Per-tag display formats applied to column values (lib/engine/format). */
+  tagFormats?: TagFormats
 }
 
 /**
@@ -45,6 +48,7 @@ export function substituteTags(html: string, opts: SubstituteOptions): string {
       const bound = resolveBoundTag(tag, opts.groupRows ?? [row], opts.ruleBindings, {
         mapping,
         onMissing,
+        tagFormats: opts.tagFormats,
       })
       if (bound !== null) return valueToInlineHtml(bound)
     }
@@ -52,6 +56,6 @@ export function substituteTags(html: string, opts: SubstituteOptions): string {
     if (!column || !(column in row)) {
       return onMissing === 'placeholder' ? unmappedPlaceholder(tag) : ''
     }
-    return valueToInlineHtml(row[column] ?? '')
+    return valueToInlineHtml(formatTagValue(tag, row[column] ?? '', opts.tagFormats))
   })
 }

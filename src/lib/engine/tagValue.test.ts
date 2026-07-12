@@ -24,6 +24,12 @@ describe('substitutePlainTags', () => {
     expect(substitutePlainTags('x{{SUELTO}}y', {}, opts)).toBe('xy')
     expect(substitutePlainTags('x{{SUELTO}}y', {}, { ...opts, onMissing: 'placeholder' })).toBe('x[SUELTO]y')
   })
+  it('applies the tag display format; unparseable cells pass through', () => {
+    const withFormats = { ...opts, tagFormats: { NOMBRE: 'mayusculas' as const, NIF: 'fecha_larga' as const } }
+    expect(substitutePlainTags('{{NOMBRE}} {{NIF}}', { Nombre: 'Ana', Nif: 'B1' }, withFormats)).toBe(
+      'ANA B1',
+    )
+  })
 })
 
 describe('resolveRuleText', () => {

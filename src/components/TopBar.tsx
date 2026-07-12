@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Download, Eye, FileText, Pencil } from 'lucide-react'
 import { useWorkspace } from '../state/workspaceStore'
 import { fetchDocumentFn } from '../server/fetch'
-import { loadDataIntoWorkspace, missingColumnsNotice } from '../lib/loadData'
+import { formatIssuesNotice, loadDataIntoWorkspace, missingColumnsNotice } from '../lib/loadData'
 import { extractGoogleId, extractSheetGid, withSheetGid } from '../lib/url'
 import type { DataSourceKind } from '../types'
 import { Button, ErrorNote, Spinner } from './ui'
@@ -74,7 +74,7 @@ export function TopBar({
         // With several tabs, ALWAYS say which one fed the data — a Share-button
         // link carries no tab and silently means "the first one".
         const head = res.multiTab && res.tabTitle ? `${base} (pestaña «${res.tabTitle}»).` : `${base}.`
-        notify(head + missingColumnsNotice(res.missingColumns))
+        notify(head + missingColumnsNotice(res.missingColumns) + formatIssuesNotice(res.formatIssues))
       } else setError(res)
     } catch {
       setError({ error: 'Algo salió mal al leer los datos. Inténtalo de nuevo.' })

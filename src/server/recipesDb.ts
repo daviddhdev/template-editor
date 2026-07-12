@@ -51,6 +51,9 @@ function validRecipe(v: unknown): RecipeInput {
     ruleBindings: (r.ruleBindings === undefined
       ? undefined
       : requireRecord(r.ruleBindings, 'ruleBindings')) as RecipeInput['ruleBindings'],
+    tagFormats: (r.tagFormats === undefined
+      ? undefined
+      : requireRecord(r.tagFormats, 'tagFormats')) as RecipeInput['tagFormats'],
     group: requireRecord(r.group, 'group') as unknown as RecipeInput['group'],
     sourceFile: (r.sourceFile === undefined || r.sourceFile === null
       ? undefined
@@ -158,6 +161,7 @@ export const getRecipeFn = createServerFn({ method: 'POST' })
           dataUrl: r.data_url,
           mapping: r.mapping,
           ruleBindings: r.rule_bindings ?? {},
+          tagFormats: r.tag_formats ?? {},
           group: r.group_config,
           sourceFile: r.source_file ?? undefined,
           outputFolderUrl: r.output_folder_url ?? '',
@@ -183,11 +187,12 @@ export const saveRecipeFn = createServerFn({ method: 'POST' })
       const rows = await sql`
         INSERT INTO recipes (owner_id, name, template_url, editor_html, editor_css, editor_title,
           editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
-          source_file, output_folder_url, thumbnail)
+          tag_formats, source_file, output_folder_url, thumbnail)
         VALUES (${user.id}, ${r.name}, ${r.templateUrl}, ${r.editorHtml}, ${r.editorCss}, ${r.editorTitle},
           ${r.editorBodyClass}, ${r.dataKind}, ${r.dataUrl}, ${sql.json(r.mapping)},
           ${sql.json(r.group as unknown as Parameters<typeof sql.json>[0])},
           ${sql.json((r.ruleBindings ?? {}) as unknown as Parameters<typeof sql.json>[0])},
+          ${sql.json((r.tagFormats ?? {}) as unknown as Parameters<typeof sql.json>[0])},
           ${r.sourceFile ? sql.json(r.sourceFile as unknown as Parameters<typeof sql.json>[0]) : null},
           ${r.outputFolderUrl ?? ''}, ${thumbnail ?? null})
         RETURNING id`
@@ -220,6 +225,7 @@ export const updateRecipeFn = createServerFn({ method: 'POST' })
           mapping = ${sql.json(r.mapping)},
           group_config = ${sql.json(r.group as unknown as Parameters<typeof sql.json>[0])},
           rule_bindings = ${sql.json((r.ruleBindings ?? {}) as unknown as Parameters<typeof sql.json>[0])},
+          tag_formats = ${sql.json((r.tagFormats ?? {}) as unknown as Parameters<typeof sql.json>[0])},
           source_file = ${r.sourceFile ? sql.json(r.sourceFile as unknown as Parameters<typeof sql.json>[0]) : null},
           output_folder_url = ${r.outputFolderUrl ?? ''},
           thumbnail = ${thumbnail ?? null},

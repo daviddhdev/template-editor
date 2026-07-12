@@ -36,6 +36,7 @@ export function SaveRecipeDialog({ onClose }: { onClose: () => void }) {
       dataUrl: s.dataUrl,
       mapping: s.mapping,
       ruleBindings: s.ruleBindings,
+      tagFormats: s.tagFormats,
       group: s.group,
       sourceFile: s.sourceFile ?? undefined,
       outputFolderUrl: s.outputFolderUrl,

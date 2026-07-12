@@ -1,4 +1,6 @@
 import { Check, Trash2, Unlink } from 'lucide-react'
+import type { FormatId } from '../types'
+import { FIELD_FORMATS } from '../lib/engine/format'
 import { Button, useDialogChrome } from './ui'
 
 /** Popover to bind a clicked field chip to a data column. */
@@ -7,8 +9,10 @@ export function BindFieldPopover({
   columns,
   current,
   implicit,
+  format,
   onAssign,
   onUnassign,
+  onFormat,
   onRule,
   onRemove,
   onClose,
@@ -19,9 +23,13 @@ export function BindFieldPopover({
   current: string | null
   /** True when `current` comes from the name match, not an explicit choice. */
   implicit: boolean
+  /** Display format chosen for this field (null = as-is). */
+  format: FormatId | null
   onAssign: (column: string) => void
   /** Clear the explicit binding (shown only when there is one). */
   onUnassign: () => void
+  /** Choose how the value is written (null = as-is). */
+  onFormat: (format: FormatId | null) => void
   /** Bind to a rule instead: false = conditional text, true = repeat per row. */
   onRule: (perRow: boolean) => void
   /** Delete the clicked chip from the document. */
@@ -29,6 +37,7 @@ export function BindFieldPopover({
   onClose: () => void
 }) {
   const dialogRef = useDialogChrome(onClose)
+  const formatLabel = FIELD_FORMATS.find((f) => f.id === format)?.label
   return (
     <div
       ref={dialogRef}
@@ -40,7 +49,14 @@ export function BindFieldPopover({
         {current ? (
           <>
             <strong>{tag}</strong> se rellena con la columna <strong>{current}</strong>
-            {implicit ? ' (coincide por nombre)' : ''}. ¿Cambiarlo?
+            {implicit ? ' (coincide por nombre)' : ''}
+            {formatLabel ? (
+              <>
+                {' '}
+                en formato <strong>{formatLabel}</strong>
+              </>
+            ) : null}
+            . ¿Cambiarlo?
           </>
         ) : (
           <>
@@ -71,6 +87,40 @@ export function BindFieldPopover({
           Aún no has cargado los datos. Cárgalos arriba y vuelve a pulsar el campo.
         </p>
       )}
+      {current ? (
+        <>
+          <p className="mb-1.5 text-xs text-ink-muted">¿Cómo se escribe?</p>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            <button
+              onClick={() => onFormat(null)}
+              title="El valor de la celda, sin cambios"
+              className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                format === null
+                  ? 'bg-ink text-white'
+                  : 'bg-canvas-soft text-ink-secondary hover:bg-hairline'
+              }`}
+            >
+              {format === null ? <Check className="h-3.5 w-3.5" /> : null}
+              Tal cual
+            </button>
+            {FIELD_FORMATS.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => onFormat(f.id)}
+                title={`Ej.: ${f.example}`}
+                className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                  format === f.id
+                    ? 'bg-ink text-white'
+                    : 'bg-canvas-soft text-ink-secondary hover:bg-hairline'
+                }`}
+              >
+                {format === f.id ? <Check className="h-3.5 w-3.5" /> : null}
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
       <p className="mb-1.5 text-xs text-ink-muted">O rellénalo con un texto construido:</p>
       <div className="mb-3 flex flex-wrap gap-1.5">
         <button

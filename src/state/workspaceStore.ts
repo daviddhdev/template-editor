@@ -4,9 +4,11 @@ import type {
   ConditionalRule,
   DataSourceData,
   DataSourceKind,
+  FormatId,
   GroupConfig,
   Recipe,
   RuleBindings,
+  TagFormats,
   TagMapping,
 } from '../types'
 import type { RawDocument } from '../lib/template/parse'
@@ -106,6 +108,12 @@ interface WorkspaceState {
    */
   ruleBindings: RuleBindings
 
+  /**
+   * Per-tag display formats (types.ts TagFormats). Kept even while the tag is
+   * unbound or its column is missing — like `mapping`, coming back revives it.
+   */
+  tagFormats: TagFormats
+
   group: GroupConfig
 
   /** Drive folder URL (pasted by the user) where generated documents are
@@ -143,6 +151,8 @@ interface WorkspaceState {
   /** Bind a tag to a rule (clears any column binding for it). */
   bindRule: (tag: string, rule: ConditionalRule, perRow: boolean) => void
   unbindRule: (tag: string) => void
+  /** Set (or clear, with null) the display format of a tag. */
+  setTagFormat: (tag: string, format: FormatId | null) => void
 
   setGroup: (patch: Partial<GroupConfig>) => void
   setOutputFolderUrl: (url: string) => void
@@ -187,6 +197,7 @@ export const useWorkspace = create<WorkspaceState>()(
       sheetTabs: [],
       mapping: {},
       ruleBindings: {},
+      tagFormats: {},
       group: initialGroup,
       outputFolderUrl: '',
       savedRecipe: null,
@@ -254,6 +265,14 @@ export const useWorkspace = create<WorkspaceState>()(
         set((s) => {
           const { [tag]: _dropped, ...rest } = s.ruleBindings
           return { ruleBindings: rest }
+        }),
+      setTagFormat: (tag, format) =>
+        set((s) => {
+          if (!format) {
+            const { [tag]: _dropped, ...rest } = s.tagFormats
+            return { tagFormats: rest }
+          }
+          return { tagFormats: { ...s.tagFormats, [tag]: format } }
         }),
       mergeMapping: (m) =>
         set((s) => {
@@ -330,6 +349,7 @@ export const useWorkspace = create<WorkspaceState>()(
           sheetTabs: [],
           mapping: r.mapping,
           ruleBindings: r.ruleBindings ?? {},
+          tagFormats: r.tagFormats ?? {},
           group: r.group,
           outputFolderUrl: r.outputFolderUrl ?? '',
           savedRecipe: { id: r.id, name: r.name },
@@ -353,6 +373,7 @@ export const useWorkspace = create<WorkspaceState>()(
           sheetTabs: [],
           mapping: {},
           ruleBindings: {},
+          tagFormats: {},
           group: initialGroup,
           outputFolderUrl: '',
           savedRecipe: null,
@@ -379,6 +400,7 @@ export const useWorkspace = create<WorkspaceState>()(
         sheetTabs: s.sheetTabs,
         mapping: s.mapping,
         ruleBindings: s.ruleBindings,
+        tagFormats: s.tagFormats,
         group: s.group,
         outputFolderUrl: s.outputFolderUrl,
         savedRecipe: s.savedRecipe,
@@ -430,6 +452,7 @@ export async function rehydrateStores(user: { id: string; email: string }): Prom
       sheetTabs: [],
       mapping: {},
       ruleBindings: {},
+      tagFormats: {},
       group: initialGroup,
       outputFolderUrl: '',
       savedRecipe: null,

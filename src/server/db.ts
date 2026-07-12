@@ -122,6 +122,8 @@ const MIGRATIONS: string[] = [
     saved_at_ms bigint NOT NULL,
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
+  // Tag -> display format (fecha larga, importe en letra…), lib/engine/format.ts.
+  `ALTER TABLE recipes ADD COLUMN tag_formats jsonb NOT NULL DEFAULT '{}'`,
 ]
 
 let client: postgres.Sql | null = null

@@ -130,6 +130,11 @@ describe('buildNativeJobs', () => {
     expect(jobs[0].replacements.find((r) => r.tag === 'NIF')!.replace).toBe('')
   })
 
+  it('applies per-tag display formats to the replacement text', () => {
+    const jobs = buildNativeJobs({ ...plan, tagFormats: { NOMBRE: 'mayusculas' } }, {})
+    expect(jobs[0].replacements.find((r) => r.tag === 'NOMBRE')!.replace).toBe('ANA')
+  })
+
   it('resolves rule-bound tags: conditional once per doc, repeat once per row', () => {
     const rule = {
       id: 'r',

@@ -1,7 +1,7 @@
 import type { DataSourceKind } from '../types'
 import { fetchDataFn, listSheetTabsFn, type SheetTab } from '../server/fetch'
 import { useWorkspace } from '../state/workspaceStore'
-import { missingBoundColumns } from './plan'
+import { formatParseIssues, missingBoundColumns, type FormatIssue } from './plan'
 import { extractSheetGid } from './url'
 
 export type LoadDataResult =
@@ -14,6 +14,8 @@ export type LoadDataResult =
       /** Columns bound somewhere (campos, agrupación, reglas) but absent from
        * the data just loaded — typically after switching sheet tabs. */
       missingColumns: string[]
+      /** Formatted columns with cells the format cannot parse (pass through). */
+      formatIssues: FormatIssue[]
     }
   | { ok: false; error: string; hint?: string }
 
@@ -25,6 +27,24 @@ export function missingColumnsNotice(missing: string[]): string {
   return missing.length === 1
     ? ` Ojo: aquí falta la columna ${list}, usada por campos, agrupación o reglas — queda sin efecto hasta reasignarla o volver a la pestaña anterior.`
     : ` Ojo: aquí faltan las columnas ${list}, usadas por campos, agrupación o reglas — quedan sin efecto hasta reasignarlas o volver a la pestaña anterior.`
+}
+
+/** Warning sentence for `formatIssues`, or '' — appended to the load toast
+ * like {@link missingColumnsNotice} (notices are one-at-a-time). */
+export function formatIssuesNotice(issues: FormatIssue[]): string {
+  if (issues.length === 0) return ''
+  const parts = issues.map((i) => {
+    const what =
+      i.kind === 'date'
+        ? i.bad === 1
+          ? 'no parece una fecha'
+          : 'no parecen fechas'
+        : i.bad === 1
+          ? 'no parece un importe'
+          : 'no parecen importes'
+    return `${i.bad} ${i.bad === 1 ? 'celda' : 'celdas'} de «${i.column}» ${what} (p. ej. «${i.example}»)`
+  })
+  return ` Ojo: ${parts.join('; ')} — saldrán tal cual, sin el formato elegido.`
 }
 
 /**
@@ -68,6 +88,12 @@ export async function loadDataIntoWorkspace(
       store.group,
       store.ruleBindings,
       res.data.columns,
+    ),
+    formatIssues: formatParseIssues(
+      store.tagFormats,
+      store.mapping,
+      res.data.columns,
+      res.data.rows,
     ),
   }
 }

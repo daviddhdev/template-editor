@@ -14,6 +14,7 @@
 import { parse } from 'node-html-parser'
 import type { GenerationPlan } from '../types'
 import type { NativeJob, NativeReplacement } from '../server/googleNative'
+import { formatTagValue } from './engine/format'
 import { resolveBoundTag } from './engine/tagValue'
 import { fingerprintCss, fingerprintHtml } from './fingerprint'
 import { planGroups } from './plan'
@@ -99,7 +100,7 @@ export function buildNativeJobs(
   plan: GenerationPlan,
   literals: Record<string, string[]>,
 ): NativeJob[] {
-  const sub = { mapping: plan.mapping, onMissing: 'empty' as const }
+  const sub = { mapping: plan.mapping, onMissing: 'empty' as const, tagFormats: plan.tagFormats }
   return planGroups(plan).map((group) => {
     // Non-repeatable content uses the group's first row (resolveGroupBody
     // semantics); anchored perRow rules consume the whole group.
@@ -109,7 +110,11 @@ export function buildNativeJobs(
       const bound = resolveBoundTag(tag, group.rows, plan.ruleBindings, sub)
       if (bound !== null) return { tag, finds, replace: bound }
       const column = plan.mapping[tag]
-      return { tag, finds, replace: column ? (row[column] ?? '') : '' }
+      return {
+        tag,
+        finds,
+        replace: column ? formatTagValue(tag, row[column] ?? '', plan.tagFormats) : '',
+      }
     })
     return { name: group.key, replacements }
   })

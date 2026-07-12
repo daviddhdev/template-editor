@@ -1,5 +1,6 @@
-import type { ConditionBranch, ConditionalRule, RuleBindings, TagMapping } from '../../types'
+import type { ConditionBranch, ConditionalRule, RuleBindings, TagFormats, TagMapping } from '../../types'
 import { tagRe } from '../tagRegex'
+import { formatTagValue } from './format'
 
 /**
  * PLAIN-TEXT tag resolution, shared by all three generation routes.
@@ -16,6 +17,8 @@ export interface PlainSubOptions {
   mapping: TagMapping
   /** 'placeholder' → visible `[tag]` marker (previews); 'empty' → nothing. */
   onMissing: 'placeholder' | 'empty'
+  /** Per-tag display formats applied to column values (lib/engine/format). */
+  tagFormats?: TagFormats
 }
 
 /** Replace every {{tag}} in PLAIN text with its column value for the row. */
@@ -31,7 +34,7 @@ export function substitutePlainTags(
     if (!column || !(column in row)) {
       return opts.onMissing === 'placeholder' ? `[${tag}]` : ''
     }
-    return row[column] ?? ''
+    return formatTagValue(tag, row[column] ?? '', opts.tagFormats)
   })
 }
 

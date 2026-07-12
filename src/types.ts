@@ -71,6 +71,29 @@ export interface DataSourceData {
 export type TagMapping = Record<string, string | null>
 
 /**
+ * Display format applied to a column-bound tag's value at substitution time
+ * (every generation route, rule texts included) — replaces the auxiliary
+ * formula columns users kept in their sheets. Closed list; a cell that cannot
+ * be parsed for its format passes through unchanged (see lib/engine/format.ts).
+ */
+export type FormatId =
+  | 'fecha_larga' // «12 de julio de 2026»
+  | 'fecha_corta' // «12/07/2026»
+  | 'moneda' // «1.200,00 €» (always 2 decimals)
+  | 'importe_letra' // «mil doscientos euros (1.200 €)»
+  | 'importe_letra_mayus' // «MIL DOSCIENTOS EUROS (1.200 €)»
+  | 'mayusculas' // «ACME SL»
+  | 'titulo' // «Juan Pérez de la Cruz»
+
+/**
+ * tag name -> display format. Absent tag = value used as-is. Keyed by tag
+ * (not tag+column): rebinding the column keeps the chosen format. Entries
+ * survive unbinding (like `mapping`) and are simply ignored while the tag is
+ * rule-bound or unmapped.
+ */
+export type TagFormats = Record<string, FormatId>
+
+/**
  * A document tag bound to a RULE instead of a column (the "anchored" model,
  * mirroring the team's previous Apps Script flow): the tag's substituted value
  * is the rule's resolved text. `perRow: false` evaluates once per document
@@ -151,6 +174,8 @@ export interface GenerationPlan {
   data: DataSourceData
   mapping: TagMapping
   ruleBindings: RuleBindings
+  /** Per-tag display formats. Absent = every value as-is. */
+  tagFormats?: TagFormats
   group: GroupConfig
 }
 
@@ -176,6 +201,8 @@ export interface Recipe {
   mapping: TagMapping
   /** Tag -> rule bindings (anchored conditionals/repeats). Absent in old recipes. */
   ruleBindings?: RuleBindings
+  /** Tag -> display format. Absent in recipes saved before this existed. */
+  tagFormats?: TagFormats
   group: GroupConfig
   /**
    * Imported Drive file + as-imported fingerprints (see lib/nativeMerge.ts),

@@ -65,4 +65,16 @@ describe('substituteTags with rule bindings', () => {
     })
     expect(out).toBe('<p>abre {{ llaves</p><p>Ana</p>')
   })
+
+  it('applies display formats to column tags, in doc AND inside rule texts', () => {
+    const out = substituteTags('<p>{{TOTAL}}</p><p>{{S}}</p>', {
+      mapping: { TOTAL: 'Total', NOMBRE: 'Nombre' },
+      onMissing: 'empty',
+      ruleBindings: { S: { rule: { ...rule, defaultText: 'Firma: {{NOMBRE}}' }, perRow: false } },
+      tagFormats: { TOTAL: 'importe_letra', NOMBRE: 'mayusculas' },
+      row: { Total: '1200', Nombre: 'ana pérez' },
+      groupRows: [{ Total: '1200', Nombre: 'ana pérez' }],
+    })
+    expect(out).toBe('<p>mil doscientos euros (1.200 €)</p><p>Firma: ANA PÉREZ</p>')
+  })
 })

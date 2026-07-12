@@ -40,7 +40,13 @@ function renderBlockForRow(
   onMissing: MissingMode,
   groupRows: Record<string, string>[],
 ): string {
-  const sub = { mapping: plan.mapping, onMissing, ruleBindings: plan.ruleBindings, groupRows }
+  const sub = {
+    mapping: plan.mapping,
+    onMissing,
+    ruleBindings: plan.ruleBindings,
+    groupRows,
+    tagFormats: plan.tagFormats,
+  }
   if (block.cond) return resolveConditional(block.cond, row, sub)
   return substituteTags(resolveInlineConds(block.html, row, sub), { ...sub, row })
 }

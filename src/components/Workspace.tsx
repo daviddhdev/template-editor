@@ -33,6 +33,7 @@ export function Workspace() {
     data,
     mapping,
     ruleBindings,
+    tagFormats,
     group,
     view,
     notice,
@@ -104,9 +105,10 @@ export function Workspace() {
       // Rule-text tags need column values too, so map the full tag set.
       mapping: effectiveMapping(allPlanTags(template, ruleBindings), data.columns, mapping),
       ruleBindings,
+      tagFormats,
       group,
     }
-  }, [template, data, mapping, ruleBindings, group])
+  }, [template, data, mapping, ruleBindings, tagFormats, group])
 
   // Preview: the group LIST is cheap; only the visible document is resolved
   // (resolving all 500 groups of a big batch froze the tab on every switch).
