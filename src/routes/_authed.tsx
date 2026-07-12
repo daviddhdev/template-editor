@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
 import { meFn } from '../server/auth'
-import { rehydrateStores, useWorkspace } from '../state/workspaceStore'
+import { rehydrateStores } from '../state/workspaceStore'
 
 /**
  * Pathless layout that gates every app screen behind the session. Runs on SSR
@@ -20,23 +20,15 @@ export const Route = createFileRoute('/_authed')({
   component: AuthedLayout,
 })
 
-/** The account the persisted workspace draft belongs to (browser-local). */
-const LAST_USER_KEY = 'ttg-last-user'
-
 function AuthedLayout() {
   const { user } = Route.useRouteContext()
 
-  // The workspace draft lives in localStorage (per browser, not per user):
-  // when a DIFFERENT account logs in on this browser, reset it so nobody
-  // continues someone else's draft. Same account re-login keeps the draft.
+  // The workspace draft is PER USER (DB row + per-user localStorage mirror):
+  // hydrating with the session user restores that account's draft and cleans
+  // any other account's mirror left on this browser (see draftStorage.ts).
   useEffect(() => {
-    void (async () => {
-      await rehydrateStores()
-      const last = localStorage.getItem(LAST_USER_KEY)
-      if (last !== null && last !== user.email) useWorkspace.getState().reset()
-      localStorage.setItem(LAST_USER_KEY, user.email)
-    })()
-  }, [user.email])
+    void rehydrateStores(user)
+  }, [user.id, user.email]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return <Outlet />
 }

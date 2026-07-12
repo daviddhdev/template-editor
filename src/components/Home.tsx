@@ -12,7 +12,7 @@ import {
   Search,
   Trash2,
 } from 'lucide-react'
-import { rehydrateStores, useWorkspace } from '../state/workspaceStore'
+import { storesHydrated, useWorkspace } from '../state/workspaceStore'
 import { useRecipes } from '../state/recipesStore'
 import {
   deleteRecipeFn,
@@ -86,12 +86,12 @@ export function HomeScreen() {
   }, [])
   useEffect(refreshGoogle, [refreshGoogle])
 
-  // Hydrate the persisted stores, migrate any localStorage-era templates into
-  // the database (one-time), then list the library.
+  // Wait for the authed layout's hydration, migrate any localStorage-era
+  // templates into the database (one-time), then list the library.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      await rehydrateStores()
+      await storesHydrated()
       const legacy = useRecipes.getState().recipes
       if (legacy.length > 0) {
         let migrated = 0

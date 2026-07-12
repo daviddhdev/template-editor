@@ -12,6 +12,7 @@ import type {
 import type { RawDocument } from '../lib/template/parse'
 import { fingerprintCss, fingerprintHtml } from '../lib/fingerprint'
 import { tagLiterals, type SourceFileMeta } from '../lib/nativeMerge'
+import { configureDraftStorage, draftStorage } from './draftStorage'
 
 /**
  * Single-screen workspace state. Deliberately small: everything that is
@@ -20,16 +21,19 @@ import { tagLiterals, type SourceFileMeta } from '../lib/nativeMerge'
  * the store only holds sources, data, explicit field bindings and the view
  * mode.
  *
- * Persistence: the working state auto-saves to localStorage so an accidental
- * reload never loses work (skipHydration — Workspace rehydrates on the client
- * and bumps docToken so the editor iframe re-renders the restored document).
+ * Persistence: the working state auto-saves PER USER — instantly to a
+ * per-user localStorage mirror and, debounced, to the DB (workspace_drafts;
+ * see draftStorage.ts) — so an accidental reload never loses work and the
+ * draft follows the account across browsers. skipHydration: the authed
+ * layout rehydrates on the client with the session user and docToken is
+ * bumped so the editor iframe re-renders the restored document.
  *
  * History: undo/redo works on snapshots of (editorHtml, editorCss) — the two
  * values that fully define the document. One stack for EVERYTHING (typing,
  * fields, conditionals, repeats, formatting, margins): the browser's native
  * contenteditable undo cannot see programmatic DOM mutations, so it is
  * intercepted and replaced by this. Memory-only (never persisted: snapshots
- * of a 1 MB document would blow the localStorage quota).
+ * of a 1 MB document would blow the storage quota).
  */
 
 /** One undoable step: the document state BEFORE the change named `label`. */
@@ -166,46 +170,6 @@ interface WorkspaceState {
 }
 
 const initialGroup: GroupConfig = { mode: 'per_row', groupByColumn: null }
-
-/**
- * localStorage that WARNS when a write fails (quota exceeded): zustand's
- * persist swallows storage errors, so with a big document (inlined images +
- * data rows can pass the ~5 MB origin quota) the autosave silently stopped
- * working while the user kept typing under the assumption it existed.
- */
-let quotaWarned = false
-function warningStorage(): Storage {
-  return {
-    getItem: (k: string) => localStorage.getItem(k),
-    removeItem: (k: string) => localStorage.removeItem(k),
-    setItem: (k: string, v: string) => {
-      try {
-        localStorage.setItem(k, v)
-        quotaWarned = false
-      } catch {
-        // Swallowed (rethrowing would break the store action that triggered
-        // the save) — but tell the user their safety net is gone.
-        if (!quotaWarned) {
-          quotaWarned = true
-          // Deferred: setItem runs inside a store update; notify() sets state.
-          setTimeout(() => {
-            useWorkspace
-              .getState()
-              .notify(
-                'El documento es demasiado grande para el guardado automático del navegador: usa «Guardar plantilla» para no perder los cambios.',
-              )
-          }, 0)
-        }
-      }
-    },
-    // Unused Storage members, present to satisfy the interface.
-    clear: () => localStorage.clear(),
-    key: (i: number) => localStorage.key(i),
-    get length() {
-      return localStorage.length
-    },
-  }
-}
 
 export const useWorkspace = create<WorkspaceState>()(
   persist(
@@ -397,9 +361,10 @@ export const useWorkspace = create<WorkspaceState>()(
     }),
     {
       name: 'ttg-workspace',
-      storage: createJSONStorage(warningStorage),
-      // SSR-safe: Workspace calls rehydrate() in a client effect, then bumps
-      // docToken so DocCanvas rewrites the iframe with the restored HTML.
+      storage: createJSONStorage(() => draftStorage),
+      // SSR-safe: the authed layout calls rehydrateStores() in a client
+      // effect (it knows the session user), then docToken is bumped so
+      // DocCanvas rewrites the iframe with the restored HTML.
       skipHydration: true,
       partialize: (s) => ({
         templateUrl: s.templateUrl,
@@ -422,21 +387,62 @@ export const useWorkspace = create<WorkspaceState>()(
   ),
 )
 
-let hydrated = false
+let hydratedFor: string | null = null
+let resolveHydrated: (() => void) | null = null
+const hydratedOnce = new Promise<void>((resolve) => {
+  resolveHydrated = resolve
+})
+
+/** Resolves once the first rehydrateStores() finishes — screens that read
+ * the restored state (Home's legacy-recipes migration) await this instead of
+ * hydrating themselves (only the authed layout knows the session user). */
+export function storesHydrated(): Promise<void> {
+  return hydratedOnce
+}
 
 /**
- * Rehydrate the persisted stores once per page load (idempotent — Home and the
- * editor both call it on mount). After restoring, docToken is bumped so the
- * editor iframe re-renders the restored document; rehydration alone would not.
+ * Rehydrate the persisted stores for the session user (idempotent per user —
+ * the authed layout calls it on mount). The workspace draft comes from the
+ * newest of DB row / local mirror (see draftStorage.ts); afterwards docToken
+ * is bumped so the editor iframe re-renders the restored document.
  */
-export async function rehydrateStores(): Promise<void> {
-  if (hydrated || typeof window === 'undefined') return
-  hydrated = true
+export async function rehydrateStores(user: { id: string; email: string }): Promise<void> {
+  if (typeof window === 'undefined' || hydratedFor === user.id) return
+  const switching = hydratedFor !== null
+  hydratedFor = user.id
+  configureDraftStorage(user, (text) => useWorkspace.getState().notify(text))
+  if (switching) {
+    // A different account took over this tab without a reload: nothing of the
+    // previous user may survive in memory (their draft-less rehydrate below
+    // would otherwise keep the current state). History included — it holds
+    // the other user's document snapshots.
+    useWorkspace.setState((s) => ({
+      templateUrl: '',
+      editorHtml: '',
+      editorCss: '',
+      editorTitle: 'Plantilla',
+      editorBodyClass: '',
+      docToken: s.docToken + 1,
+      sourceFile: null,
+      dataKind: 'google_sheet',
+      dataUrl: '',
+      data: null,
+      sheetTabs: [],
+      mapping: {},
+      ruleBindings: {},
+      group: initialGroup,
+      outputFolderUrl: '',
+      savedRecipe: null,
+      view: 'edit',
+      history: { past: [], future: [] },
+    }))
+  }
   const { useRecipes } = await import('./recipesStore')
   await Promise.resolve(useWorkspace.persist.rehydrate())
   await Promise.resolve(useRecipes.persist.rehydrate())
   const s = useWorkspace.getState()
   if (s.editorHtml.trim()) useWorkspace.setState({ docToken: s.docToken + 1 })
+  resolveHydrated?.()
 }
 
 // Dev-only: lets browser smoke tests drive the store without hitting Google.

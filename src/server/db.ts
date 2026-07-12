@@ -111,6 +111,17 @@ const MIGRATIONS: string[] = [
   `DELETE FROM generation_runs`,
   `ALTER TABLE generation_runs ADD COLUMN owner_id uuid NOT NULL`,
   `CREATE INDEX generation_runs_owner_idx ON generation_runs (owner_id, started_at DESC)`,
+  // Borrador de trabajo por usuario (autosave del workspace) — sustituye al
+  // localStorage 'ttg-workspace' compartido por navegador. Una fila por
+  // usuario; payload = el MISMO JSON que persiste zustand. saved_at_ms es el
+  // reloj del cliente que guardó: se compara con el espejo local del
+  // navegador al hidratar (gana el más nuevo, ver state/draftStorage.ts).
+  `CREATE TABLE workspace_drafts (
+    user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    payload text NOT NULL,
+    saved_at_ms bigint NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
 ]
 
 let client: postgres.Sql | null = null

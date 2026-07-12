@@ -246,14 +246,28 @@ src/
     usersDb.ts             SOLO servidor: tabla users (upsert en login, tokens
                            Google por usuario)
     auth.ts                Server fns de sesión: meFn (sonda del guard de
-                           rutas), logoutFn
+                           rutas; devuelve id+email — el id clava el espejo
+                           local del borrador), logoutFn
+    draftsDb.ts            Server fns del borrador de trabajo por usuario:
+                           getDraftFn/saveDraftFn sobre workspace_drafts
+                           (una fila por usuario, upsert último-gana,
+                           payload = el JSON del persist, tope 25 MB)
     googlePdf.ts           Server fn: HTML -> PDF/DOCX vía Google (sube cada
                            documento resuelto convertido a Google Doc temporal,
                            exporta los formatos pedidos, borra)
-  state/workspaceStore.ts  Estado de la pantalla única (zustand + persist en
-                           localStorage 'ttg-workspace': una recarga no pierde
-                           trabajo; skipHydration + rehidratación en Workspace
-                           con bump de docToken para re-render del iframe)
+  state/workspaceStore.ts  Estado de la pantalla única (zustand + persist POR
+                           USUARIO: espejo localStorage 'ttg-workspace:<id>'
+                           síncrono + fila en DB con debounce — una recarga no
+                           pierde trabajo y el borrador sigue a la cuenta en
+                           cualquier navegador; skipHydration + rehidratación
+                           en el layout _authed con el usuario de sesión y
+                           bump de docToken para re-render del iframe)
+  state/draftStorage.ts    Storage del persist del workspace: al hidratar gana
+                           el más nuevo (espejo local vs DB) y el perdedor se
+                           resincroniza; migra el borrador legacy
+                           'ttg-workspace' una vez y borra espejos de OTROS
+                           usuarios (privacidad en navegador compartido);
+                           flush en pagehide y al cerrar sesión
   state/recipesStore.ts    LEGACY: solo existe para migrar las plantillas del
                            localStorage antiguo a la DB (Home lo lee y lo vacía)
   components/

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, CircleCheck, FileStack, Home, RotateCcw, Save } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
-import { rehydrateStores, useWorkspace } from '../state/workspaceStore'
+import { useWorkspace } from '../state/workspaceStore'
 import type { GenerationPlan } from '../types'
 import { buildTemplateCached } from '../lib/template/parse'
 import { allPlanTags, effectiveMapping, planGroups, renderDocuments, unmappedTags } from '../lib/plan'
@@ -68,11 +68,6 @@ export function Workspace() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
-  // Restore the persisted workspace (client-only; idempotent across routes).
-  useEffect(() => {
-    void rehydrateStores()
   }, [])
 
   // Google connection: with the user's connection alive, the PDFs are

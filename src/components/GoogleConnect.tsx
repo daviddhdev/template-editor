@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { CircleCheck, LogOut } from 'lucide-react'
 import { googleAuthUrlFn, type GoogleStatus } from '../server/google'
 import { logoutFn } from '../server/auth'
+import { shutdownDraftSync } from '../state/draftStorage'
 import { LOGIN_REDIRECT_KEY } from '../routes/login'
 import { ConfirmDialog } from './ui'
 
@@ -52,6 +53,9 @@ export function GoogleConnect({
     setBusy(true)
     setError(null)
     try {
+      // Draft to the DB first (and, if it got there, the local mirror goes:
+      // nothing personal stays on a shared browser).
+      await shutdownDraftSync()
       await logoutFn()
     } finally {
       setBusy(false)
@@ -114,7 +118,7 @@ export function GoogleConnect({
       {confirmLogout ? (
         <ConfirmDialog
           title="¿Cerrar sesión?"
-          body="El borrador de trabajo se queda guardado en este navegador. Tu conexión con Google Drive no se toca: al volver a entrar seguirá funcionando."
+          body="El borrador de trabajo queda guardado en tu cuenta: lo recuperarás al volver a entrar, también desde otro navegador. Tu conexión con Google Drive no se toca."
           confirmLabel="Cerrar sesión"
           onConfirm={() => {
             setConfirmLogout(false)
