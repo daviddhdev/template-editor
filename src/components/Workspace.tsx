@@ -207,6 +207,7 @@ export function Workspace() {
         canGenerate={!generateBlockedReason}
         generateBlockedReason={generateBlockedReason}
         onGenerate={() => setGenerateOpen(true)}
+        google={google}
       />
 
       {/* Flow status: what is done, what is missing, why Generate is blocked

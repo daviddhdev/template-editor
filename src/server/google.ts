@@ -48,6 +48,32 @@ export const googleAuthUrlFn = createServerFn({ method: 'POST' })
     }
   })
 
+/** Credentials the Google Picker needs in the browser, fetched ON DEMAND each
+ * time the picker opens: the user's own short-lived access token (~1h; kept in
+ * memory only, never persisted client-side) plus the browser API key. */
+export const pickerConfigFn = createServerFn({ method: 'POST' }).handler(
+  async (): Promise<Result<{ accessToken: string; apiKey: string }>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
+    try {
+      const g = await import('./googleClient')
+      const apiKey = g.loadApiKey()
+      if (!apiKey) {
+        return {
+          ok: false,
+          error: 'Falta la clave de API de Google (GOOGLE_API_KEY).',
+          hint: 'Añádela al archivo .env (mira .env.example) para poder elegir archivos de Drive.',
+        }
+      }
+      const accessToken = await g.getAccessToken(user.id)
+      return { ok: true, data: { accessToken, apiKey } }
+    } catch (err) {
+      return asResultError(err, 'No se pudo preparar el selector de archivos de Drive.')
+    }
+  },
+)
+
 /** Called by the /oauth/callback route with the code Google redirected with.
  * Completes the LOGIN: upserts the user with their fresh tokens and sets the
  * session cookie. Unauthenticated on purpose (it is how a session is born). */

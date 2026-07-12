@@ -72,6 +72,17 @@ export function loadConfig(): GoogleConfig | null {
   return cachedConfig
 }
 
+let cachedApiKey: string | null | undefined
+
+/** Browser API key ("developer key") the Google Picker requires. Optional:
+ * without it the picker buttons stay disabled and pasting URLs still works. */
+export function loadApiKey(): string | null {
+  if (cachedApiKey !== undefined) return cachedApiKey
+  const env = { ...readDotEnv(), ...process.env }
+  cachedApiKey = env.GOOGLE_API_KEY?.trim() || null
+  return cachedApiKey
+}
+
 function requireConfig(): GoogleConfig {
   const cfg = loadConfig()
   if (!cfg) {
@@ -248,6 +259,8 @@ export interface GoogleStatus {
   /** The connection can WRITE into a user-chosen Drive folder (full drive
    * scope). False on older connections — the UI offers a reconnect. */
   canWrite: boolean
+  /** GOOGLE_API_KEY present — the Drive picker can open at all. */
+  pickerConfigured: boolean
   email: string | null
 }
 
@@ -263,6 +276,7 @@ export async function getStatusForUser(userId: string): Promise<GoogleStatus> {
     connected,
     canRead: connected && (granted.has(READ_SCOPE) || granted.has(FULL_SCOPE)),
     canWrite: connected && granted.has(FULL_SCOPE),
+    pickerConfigured: loadApiKey() !== null,
     email: null, // the session, not the Google connection, names the user now
   }
 }

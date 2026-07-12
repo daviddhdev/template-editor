@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Download, Eye, FileText, Pencil } from 'lucide-react'
 import { useWorkspace } from '../state/workspaceStore'
 import { fetchDocumentFn } from '../server/fetch'
+import type { GoogleStatus } from '../server/google'
 import { formatIssuesNotice, loadDataIntoWorkspace, missingColumnsNotice } from '../lib/loadData'
+import { canonicalPickedUrl } from '../lib/googlePicker'
 import { extractGoogleId, extractSheetGid, withSheetGid } from '../lib/url'
 import type { DataSourceKind } from '../types'
+import { PickerButton } from './PickerButton'
 import { Button, ErrorNote, Spinner } from './ui'
 
 type LoadError = { error: string; hint?: string } | null
@@ -21,10 +24,12 @@ export function TopBar({
   canGenerate,
   generateBlockedReason,
   onGenerate,
+  google,
 }: {
   canGenerate: boolean
   generateBlockedReason: string | null
   onGenerate: () => void
+  google: GoogleStatus | null
 }) {
   const {
     templateUrl,
@@ -48,13 +53,38 @@ export function TopBar({
   const [dataLoading, setDataLoading] = useState(false)
   const [error, setError] = useState<LoadError>(null)
 
-  async function loadDoc() {
+  // What each input last loaded successfully — pasting the SAME link again
+  // (or the debounce firing after a manual load) must not reload it.
+  const lastLoadedRef = useRef<{ template: string | null; data: string | null }>({
+    template: null,
+    data: null,
+  })
+  const templateTimer = useRef<number | null>(null)
+  const dataTimer = useRef<number | null>(null)
+
+  function clearTimer(ref: { current: number | null }) {
+    if (ref.current !== null) {
+      clearTimeout(ref.current)
+      ref.current = null
+    }
+  }
+  useEffect(
+    () => () => {
+      clearTimer(templateTimer)
+      clearTimer(dataTimer)
+    },
+    [],
+  )
+
+  async function loadDoc(url = templateUrl.trim()) {
+    clearTimer(templateTimer)
     setDocLoading(true)
     setError(null)
     try {
-      const res = await fetchDocumentFn({ data: { url: templateUrl.trim() } })
+      const res = await fetchDocumentFn({ data: { url } })
       if (res.ok) {
-        loadRawDocument(res.data, extractGoogleId(templateUrl.trim()))
+        lastLoadedRef.current.template = url
+        loadRawDocument(res.data, extractGoogleId(url))
         notify(`Plantilla cargada: «${res.data.title || 'documento'}».`)
       } else setError(res)
     } catch {
@@ -65,11 +95,13 @@ export function TopBar({
   }
 
   async function loadData(origin = dataUrl.trim()) {
+    clearTimer(dataTimer)
     setDataLoading(true)
     setError(null)
     try {
       const res = await loadDataIntoWorkspace(dataKind, origin)
       if (res.ok) {
+        lastLoadedRef.current.data = origin
         const base = `Datos cargados: ${res.rows} ${res.rows === 1 ? 'fila' : 'filas'}, ${res.columns} columnas`
         // With several tabs, ALWAYS say which one fed the data — a Share-button
         // link carries no tab and silently means "the first one".
@@ -90,6 +122,27 @@ export function TopBar({
     void loadData(url)
   }
 
+  // Typing/pasting a VALID Google link auto-loads after a pause — no «Cargar»
+  // click. Only user input passes through here: draft rehydration writes the
+  // store directly and never fires onChange, so it can't trigger a load.
+  function onTemplateUrlInput(value: string) {
+    setTemplateUrl(value)
+    clearTimer(templateTimer)
+    const url = value.trim()
+    if (extractGoogleId(url) && url !== lastLoadedRef.current.template) {
+      templateTimer.current = window.setTimeout(() => void loadDoc(url), 800)
+    }
+  }
+
+  function onDataUrlInput(value: string) {
+    setDataUrl(value)
+    clearTimer(dataTimer)
+    const url = value.trim()
+    if (dataKind === 'google_sheet' && extractGoogleId(url) && url !== lastLoadedRef.current.data) {
+      dataTimer.current = window.setTimeout(() => void loadData(url), 800)
+    }
+  }
+
   const previewDisabled = view === 'edit' && (!editorHtml.trim() || !data)
 
   return (
@@ -105,14 +158,28 @@ export function TopBar({
             </span>
             <input
               value={templateUrl}
-              onChange={(e) => setTemplateUrl(e.target.value)}
+              onChange={(e) => onTemplateUrlInput(e.target.value)}
               placeholder="Enlace del documento (Google Docs)…"
               aria-label="Enlace del documento de Google Docs"
               onKeyDown={(e) => e.key === 'Enter' && templateUrl.trim() && loadDoc()}
               className="h-full min-w-0 flex-1 border-none bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
             />
           </div>
-          <Button variant="secondary" onClick={loadDoc} disabled={docLoading || !templateUrl.trim()}>
+          <PickerButton
+            kind="document"
+            google={google}
+            label="Elegir el documento en Drive"
+            onPicked={(f) => {
+              const url = canonicalPickedUrl('document', f)
+              setTemplateUrl(url)
+              void loadDoc(url)
+            }}
+          />
+          <Button
+            variant="secondary"
+            onClick={() => loadDoc()}
+            disabled={docLoading || !templateUrl.trim()}
+          >
             {docLoading ? <Spinner /> : 'Cargar'}
           </Button>
         </div>
@@ -135,7 +202,7 @@ export function TopBar({
             </span>
             <input
               value={dataUrl}
-              onChange={(e) => setDataUrl(e.target.value)}
+              onChange={(e) => onDataUrlInput(e.target.value)}
               placeholder={
                 dataKind === 'google_sheet'
                   ? 'Enlace de la hoja de cálculo…'
@@ -146,6 +213,18 @@ export function TopBar({
               className="h-full min-w-0 flex-1 border-none bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
             />
           </div>
+          {dataKind === 'google_sheet' ? (
+            <PickerButton
+              kind="spreadsheet"
+              google={google}
+              label="Elegir la hoja de cálculo en Drive"
+              onPicked={(f) => {
+                const url = canonicalPickedUrl('spreadsheet', f)
+                setDataUrl(url)
+                void loadData(url)
+              }}
+            />
+          ) : null}
           <Button
             variant="secondary"
             onClick={() => loadData()}

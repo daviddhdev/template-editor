@@ -24,6 +24,7 @@ import { batchFolderName } from '../lib/fileName'
 import { toGenerationDocs } from '../lib/generationLog'
 import { extractGoogleFolderId } from '../lib/url'
 import { useWorkspace } from '../state/workspaceStore'
+import { PickerButton } from './PickerButton'
 import { Button, Spinner, useDialogChrome } from './ui'
 
 const FALLBACK_EXPLANATION: Record<NativeFallbackReason, string> = {
@@ -476,14 +477,25 @@ export function GenerateDialog({
                     </p>
                   ) : uploadToDrive ? (
                     <div className="ml-6 mt-1.5 space-y-1">
-                      <input
-                        type="text"
-                        value={outputFolderUrl}
-                        onChange={(e) => setOutputFolderUrl(e.target.value)}
-                        placeholder="https://drive.google.com/drive/folders/…"
-                        className="w-full rounded-md border border-input-border bg-surface px-2.5 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                        aria-label="URL de la carpeta de Drive de salida"
-                      />
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={outputFolderUrl}
+                          onChange={(e) => setOutputFolderUrl(e.target.value)}
+                          placeholder="https://drive.google.com/drive/folders/…"
+                          className="min-w-0 flex-1 rounded-md border border-input-border bg-surface px-2.5 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          aria-label="URL de la carpeta de Drive de salida"
+                        />
+                        <PickerButton
+                          kind="folder"
+                          google={google}
+                          size="sm"
+                          label="Elegir la carpeta en Drive"
+                          onPicked={(f) =>
+                            setOutputFolderUrl(`https://drive.google.com/drive/folders/${f.id}`)
+                          }
+                        />
+                      </div>
                       {outputFolderUrl.trim() !== '' && !outputFolderId ? (
                         <p className="text-xs text-red-500">
                           Esa URL no parece de una carpeta de Drive (drive.google.com/drive/folders/…).
