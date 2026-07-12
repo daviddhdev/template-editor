@@ -1,17 +1,12 @@
 import type { TagMapping } from '../../types'
 
 /**
- * EXTENSION POINT — automatic field mapping.
+ * Heuristic field mapping — the FALLBACK for «Sugerir automáticamente».
  *
- * Today this is a dummy heuristic: it matches a template field to a data column
- * by comparing their normalised names (accents/spacing/case ignored). It exists
- * so the UI can offer a "Sugerir automáticamente" button now.
- *
- * Later, replace the body with a real AI call (e.g. send the tag names + column
- * names + a few sample rows to a Claude model and ask for the best mapping).
- * Keep this exact signature so the UI keeps working unchanged:
- *
- *   export async function suggestMapping(tags, columns, sampleRows?): Promise<TagMapping>
+ * Matches a template field to a data column by comparing their normalised
+ * names (accents/spacing/case ignored). The primary path is the AI call in
+ * server/aiMapping.ts (suggestMappingFn); the UI falls back to this when the
+ * AI is unconfigured or fails, so it must stay pure, synchronous and free.
  */
 function normalise(s: string): string {
   // eslint-disable-next-line no-misleading-character-class

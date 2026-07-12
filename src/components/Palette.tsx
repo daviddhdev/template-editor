@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { GitBranch, GripVertical, Plus, Repeat, Sparkles } from 'lucide-react'
 import { useWorkspace } from '../state/workspaceStore'
 import { suggestMapping } from '../lib/ai/suggestMapping'
+import { sampleRowsForMapping } from '../lib/ai/mappingPrompt'
+import { suggestMappingFn } from '../server/aiMapping'
 import { unmappedTags } from '../lib/plan'
 import { buildTemplateCached } from '../lib/template/parse'
 import type { ConditionalRule } from '../types'
@@ -39,10 +41,12 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
     assign,
     bindRule,
     group,
+    notify,
   } = useWorkspace()
   const [customName, setCustomName] = useState('')
   /** Anchored rule being created for an unbound tag from this list. */
   const [ruleFor, setRuleFor] = useState<string | null>(null)
+  const [suggesting, setSuggesting] = useState(false)
 
   const columns = data?.columns ?? []
   // Cached: shares the parse with Workspace instead of re-parsing per render
@@ -54,10 +58,33 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
   /** Tags physically present in the document — only these can host a rule. */
   const docTags = new Set(template?.tags ?? [])
 
-  function autoSuggest() {
-    // Extension point: heuristic today, a real AI call later (same signature).
-    if (!template || columns.length === 0) return
-    mergeMapping(suggestMapping(template.tags, columns, data?.rows.slice(0, 5)))
+  async function autoSuggest() {
+    // AI first (server fn), name-similarity heuristic as fallback. Only the
+    // UNMAPPED tags travel; mergeMapping never overwrites a manual choice.
+    if (!template || columns.length === 0 || suggesting) return
+    const tags = unbound
+    if (tags.length === 0) return
+    const fallback = () => mergeMapping(suggestMapping(tags, columns, data?.rows.slice(0, 5)))
+    setSuggesting(true)
+    try {
+      const res = await suggestMappingFn({
+        data: { tags, columns, sampleRows: sampleRowsForMapping(data?.rows, columns) },
+      })
+      if (res.ok && res.data.available) {
+        mergeMapping(res.data.mapping)
+      } else if (res.ok) {
+        fallback()
+        notify('IA no configurada — sugerencia por similitud de nombres.')
+      } else {
+        fallback()
+        notify(`La IA no respondió (${res.error}) — sugerencia por similitud de nombres.`)
+      }
+    } catch {
+      fallback()
+      notify('La IA no respondió — sugerencia por similitud de nombres.')
+    } finally {
+      setSuggesting(false)
+    }
   }
 
   return (
@@ -124,9 +151,11 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
         {unbound.length > 0 && columns.length > 0 ? (
           <button
             onClick={autoSuggest}
-            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary-active"
+            disabled={suggesting}
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary-active disabled:opacity-50"
           >
-            <Sparkles className="h-3.5 w-3.5" /> Sugerir vínculos automáticamente
+            <Sparkles className={`h-3.5 w-3.5 ${suggesting ? 'animate-pulse' : ''}`} />
+            {suggesting ? 'Sugiriendo…' : 'Sugerir vínculos automáticamente'}
           </button>
         ) : null}
       </section>

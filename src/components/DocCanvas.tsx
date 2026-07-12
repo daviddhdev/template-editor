@@ -236,9 +236,16 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     const rules = useWorkspace.getState().ruleBindings
     doc.body.querySelectorAll<HTMLElement>('.ttg-chip').forEach((chip) => {
       const tag = chip.dataset.field ?? ''
-      const eff = effectiveMapping([tag], columns, explicit)
-      chip.classList.toggle('ttg-rulebound', Boolean(rules[tag]))
-      chip.classList.toggle('ttg-unbound', !eff[tag] && !rules[tag])
+      const eff = effectiveMapping([tag], columns, explicit)[tag]
+      const rule = rules[tag]
+      chip.classList.toggle('ttg-rulebound', Boolean(rule))
+      chip.classList.toggle('ttg-unbound', !eff && !rule)
+      // Hover answers "which column fills this?" without opening the popover.
+      chip.title = rule
+        ? `Se rellena con la regla «${rule.rule.label}»`
+        : eff
+          ? `Se rellena con la columna «${eff}»`
+          : 'Sin vincular — haz clic para elegir una columna'
     })
   }, [])
 
@@ -875,8 +882,14 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         <BindFieldPopover
           tag={bindTag.tag}
           columns={columns}
+          current={effectiveMapping([bindTag.tag], columns, mapping)[bindTag.tag]}
+          implicit={!mapping[bindTag.tag]}
           onAssign={(c) => {
             assign(bindTag.tag, c)
+            setBindTag(null)
+          }}
+          onUnassign={() => {
+            assign(bindTag.tag, null)
             setBindTag(null)
           }}
           onRule={(perRow) => {

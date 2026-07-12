@@ -136,8 +136,11 @@ conectada no está disponible (el motor local solo produce PDF).
   generar — o el sync automático en la vía local.)
 - **Documento (centro)**: el Doc con su CSS original, editable. Los campos son
   chips; los que no casan con ninguna columna se ven en ámbar y un clic abre el
-  popover de vinculación. *Sugerir vínculos automáticamente* usa
-  `suggestMapping()`.
+  popover de vinculación. Al pasar el ratón por un chip, el tooltip dice con qué
+  columna (o regla) se rellena; el popover marca la columna vinculada, indica si
+  el vínculo es por coincidencia de nombre y permite «Desvincular». *Sugerir vínculos automáticamente* llama a la IA
+  (`suggestMappingFn`, requiere `OPENAI_API_KEY`) y cae a la heurística
+  `suggestMapping()` si no hay clave o falla.
 - **Condiciones inline (estilo Scratch)**: la condición ES un bloque del
   documento — `<div class="ttg-cond" data-cond="…" contenteditable="false">` con
   un resumen legible ("Si provincia es «Madrid» → Aviso…"). Se inserta con clic
@@ -219,7 +222,9 @@ src/
       grouping.ts          Agrupa filas en documentos
       resolve.ts           Ensambla el documento final; resuelve .ttg-cond in situ
                            (por fila dentro de repetibles); mismo HTML preview y PDF
-    ai/suggestMapping.ts   Sugerencia de mapeo (hoy heurística; punto de extensión IA)
+    ai/suggestMapping.ts   Sugerencia de mapeo por similitud (fallback sin IA)
+    ai/mappingPrompt.ts    Helpers puros de la sugerencia IA (muestras truncadas,
+                           prompt, schema, validación de respuesta)
     plan.ts                Puente estado -> motor (preview y generación)
     download.ts            Descargas en el navegador
   server/
@@ -231,6 +236,9 @@ src/
                            Con cuenta conectada leen por API (privados OK) con
                            fallback al export público
     pdf.ts                 Server fn: HTML -> PDF con Playwright + zip (vía local)
+    aiMapping.ts           Server fn: sugerencia de mapeo con OpenAI (gpt-5-mini,
+                           JSON schema estricto; sin OPENAI_API_KEY responde
+                           available:false y el cliente usa la heurística)
     googleClient.ts        SOLO servidor (import dinámico): OAuth (auth URL,
                            exchange con puerta de dominio, refresh por usuario
                            con dedupe; tokens en la tabla users) + Drive (subir
@@ -379,9 +387,14 @@ un regex `\s` dentro de ese string — el backslash no sobrevive y `/\s+/` pasa 
 - **API externa como origen de datos.** `ApiEndpointSource`
   (`src/lib/datasource/apiEndpointSource.ts`) es un *stub* con el contrato JSON
   esperado documentado. La UI ya permite elegir "API externa".
-- **Mapeo automático con IA.** `suggestMapping()`
-  (`src/lib/ai/suggestMapping.ts`) tiene hoy una heurística por similitud de
-  nombres; misma firma para enchufar un modelo real más adelante.
+- ~~**Mapeo automático con IA.**~~ Implementado: `suggestMappingFn`
+  (`src/server/aiMapping.ts`) llama a OpenAI (`gpt-5-mini`, salida JSON con
+  schema estricto) con los tags SIN mapear, las columnas y hasta 5 filas de
+  muestra truncadas a 60 caracteres (`src/lib/ai/mappingPrompt.ts`, helpers
+  puros con tests). Requiere `OPENAI_API_KEY`; sin clave o ante cualquier
+  fallo, el botón cae a la heurística por similitud de nombres
+  (`src/lib/ai/suggestMapping.ts`) y avisa. `mergeMapping` nunca pisa una
+  elección manual.
 
 ## Limitaciones de la fase actual
 

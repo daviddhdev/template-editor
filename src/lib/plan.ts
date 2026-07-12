@@ -1,4 +1,4 @@
-import type { GenerationPlan, RuleBindings, TagMapping, Template } from '../types'
+import type { GenerationPlan, GroupConfig, RuleBindings, TagMapping, Template } from '../types'
 import { condTexts } from './cond'
 import { detectTags } from './template/parse'
 import { buildGroups, type RowGroup } from './engine/grouping'
@@ -28,8 +28,42 @@ export function effectiveMapping(
   }
   const out: TagMapping = {}
   for (const tag of tags) {
-    out[tag] = explicit[tag] ?? (cols.has(tag) ? tag : (bySuffix.get(tag) ?? null))
+    // A stale explicit binding (its column vanished after switching sheet
+    // tabs) must not LOOK bound: ignore it while the current data lacks the
+    // column, but keep it in the store — switching back revives it. With no
+    // data loaded there is nothing to validate against, so trust it.
+    const chosen = explicit[tag]
+    const valid = chosen && (columns.length === 0 || cols.has(chosen)) ? chosen : undefined
+    out[tag] = valid ?? (cols.has(tag) ? tag : (bySuffix.get(tag) ?? null))
   }
+  return out
+}
+
+/**
+ * Columns the workspace references (explicit bindings, per-group column,
+ * rule-branch conditions) that do NOT exist in the current data — the
+ * tell-tale of a sheet-tab switch. Order = first reference; empty when no
+ * data is loaded (nothing to validate against).
+ */
+export function missingBoundColumns(
+  explicit: TagMapping,
+  group: GroupConfig,
+  ruleBindings: RuleBindings,
+  columns: string[],
+): string[] {
+  if (columns.length === 0) return []
+  const cols = new Set(columns)
+  const seen = new Set<string>()
+  const out: string[] = []
+  const add = (c: string | null | undefined) => {
+    if (c && !cols.has(c) && !seen.has(c)) {
+      seen.add(c)
+      out.push(c)
+    }
+  }
+  for (const c of Object.values(explicit)) add(c)
+  if (group.mode === 'per_group') add(group.groupByColumn)
+  for (const { rule } of Object.values(ruleBindings)) for (const b of rule.branches) add(b.column)
   return out
 }
 

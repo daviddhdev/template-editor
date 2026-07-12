@@ -23,7 +23,7 @@ import {
   saveRecipeFn,
   type RecipeSummary,
 } from '../server/recipesDb'
-import { loadDataIntoWorkspace } from '../lib/loadData'
+import { loadDataIntoWorkspace, missingColumnsNotice } from '../lib/loadData'
 import { authGuard } from '../lib/authRedirect'
 import { googleStatusFn, type GoogleStatus } from '../server/google'
 import { GenerationHistory } from './GenerationHistory'
@@ -134,7 +134,10 @@ export function HomeScreen() {
         const dataRes = await loadDataIntoWorkspace(res.data.dataKind, res.data.dataUrl.trim())
         if (dataRes.ok) {
           const tab = dataRes.multiTab && dataRes.tabTitle ? ` (pestaña «${dataRes.tabTitle}»)` : ''
-          notify(`Plantilla lista: ${dataRes.rows} filas de datos${tab}.`)
+          notify(
+            `Plantilla lista: ${dataRes.rows} filas de datos${tab}.` +
+              missingColumnsNotice(dataRes.missingColumns),
+          )
         } else {
           notify(`Plantilla abierta, pero los datos no: ${dataRes.error}`)
         }

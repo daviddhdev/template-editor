@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { effectiveMapping, unmappedTags } from './plan'
+import { effectiveMapping, missingBoundColumns, unmappedTags } from './plan'
 import type { Template } from '../types'
 
 describe('effectiveMapping', () => {
@@ -23,6 +23,67 @@ describe('effectiveMapping', () => {
 
   it('unknown tags map to null', () => {
     expect(effectiveMapping(['OTRO'], ['NOMBRE'], {})).toEqual({ OTRO: null })
+  })
+
+  // Sheet-tab switch: explicit bindings to columns absent from the CURRENT
+  // data must not look bound (they'd silently substitute empty at generate).
+  it('ignores a stale explicit binding whose column is gone', () => {
+    expect(effectiveMapping(['X'], ['NOMBRE'], { X: 'VIEJA' })).toEqual({ X: null })
+  })
+
+  it('a stale explicit binding falls back to the identity match', () => {
+    expect(effectiveMapping(['NOMBRE'], ['NOMBRE'], { NOMBRE: 'VIEJA' })).toEqual({
+      NOMBRE: 'NOMBRE',
+    })
+  })
+
+  it('trusts explicit bindings while no data is loaded (nothing to validate)', () => {
+    expect(effectiveMapping(['X'], [], { X: 'VIEJA' })).toEqual({ X: 'VIEJA' })
+  })
+
+  it('a stale binding revives when its column returns', () => {
+    const explicit = { X: 'VIEJA' }
+    expect(effectiveMapping(['X'], ['OTRA'], explicit)).toEqual({ X: null })
+    expect(effectiveMapping(['X'], ['VIEJA'], explicit)).toEqual({ X: 'VIEJA' })
+  })
+})
+
+describe('missingBoundColumns', () => {
+  const rule = (column: string) => ({
+    rule: {
+      id: 'r',
+      label: 'x',
+      branches: [{ id: 'b', column, operator: 'equals' as const, value: '1', text: 't' }],
+    },
+    perRow: false,
+  })
+
+  it('collects missing columns from bindings, grouping and rules, deduped', () => {
+    expect(
+      missingBoundColumns(
+        { A: 'FALTA', B: 'NOMBRE', C: 'FALTA' },
+        { mode: 'per_group', groupByColumn: 'GRUPO_VIEJO' },
+        { R: rule('COND_VIEJA') },
+        ['NOMBRE'],
+      ),
+    ).toEqual(['FALTA', 'GRUPO_VIEJO', 'COND_VIEJA'])
+  })
+
+  it('ignores groupByColumn in per_row mode and null bindings', () => {
+    expect(
+      missingBoundColumns(
+        { A: null },
+        { mode: 'per_row', groupByColumn: 'GRUPO_VIEJO' },
+        {},
+        ['NOMBRE'],
+      ),
+    ).toEqual([])
+  })
+
+  it('returns nothing when no data is loaded', () => {
+    expect(
+      missingBoundColumns({ A: 'FALTA' }, { mode: 'per_row', groupByColumn: null }, {}, []),
+    ).toEqual([])
   })
 })
 

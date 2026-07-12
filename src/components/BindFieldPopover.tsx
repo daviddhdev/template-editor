@@ -1,18 +1,27 @@
-import { Trash2 } from 'lucide-react'
+import { Check, Trash2, Unlink } from 'lucide-react'
 import { Button, useDialogChrome } from './ui'
 
 /** Popover to bind a clicked field chip to a data column. */
 export function BindFieldPopover({
   tag,
   columns,
+  current,
+  implicit,
   onAssign,
+  onUnassign,
   onRule,
   onRemove,
   onClose,
 }: {
   tag: string
   columns: string[]
+  /** Column the field currently resolves to (explicit or by name), if any. */
+  current: string | null
+  /** True when `current` comes from the name match, not an explicit choice. */
+  implicit: boolean
   onAssign: (column: string) => void
+  /** Clear the explicit binding (shown only when there is one). */
+  onUnassign: () => void
   /** Bind to a rule instead: false = conditional text, true = repeat per row. */
   onRule: (perRow: boolean) => void
   /** Delete the clicked chip from the document. */
@@ -28,7 +37,16 @@ export function BindFieldPopover({
       className="absolute left-1/2 top-4 z-20 w-80 -translate-x-1/2 rounded-xl border border-hairline bg-surface p-4 shadow-e2"
     >
       <p className="mb-2 text-sm text-ink-secondary">
-        ¿Con qué dato se rellena <strong>{tag}</strong>?
+        {current ? (
+          <>
+            <strong>{tag}</strong> se rellena con la columna <strong>{current}</strong>
+            {implicit ? ' (coincide por nombre)' : ''}. ¿Cambiarlo?
+          </>
+        ) : (
+          <>
+            ¿Con qué dato se rellena <strong>{tag}</strong>?
+          </>
+        )}
       </p>
       {columns.length > 0 ? (
         <div className="mb-3 flex flex-wrap gap-1.5">
@@ -37,8 +55,13 @@ export function BindFieldPopover({
               key={c}
               onClick={() => onAssign(c)}
               autoFocus={i === 0}
-              className="rounded-md bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary outline-none hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-primary"
+              className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                c === current
+                  ? 'bg-primary text-white'
+                  : 'bg-primary/10 text-primary hover:bg-primary/15'
+              }`}
             >
+              {c === current ? <Check className="h-3.5 w-3.5" /> : null}
               {c}
             </button>
           ))}
@@ -64,13 +87,24 @@ export function BindFieldPopover({
         </button>
       </div>
       <div className="flex items-center justify-between gap-2">
-        <button
-          onClick={onRemove}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-red-500 outline-none hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-primary"
-          title="Eliminar este campo del documento"
-        >
-          <Trash2 className="h-3.5 w-3.5" /> Quitar campo
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onRemove}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-red-500 outline-none hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-primary"
+            title="Eliminar este campo del documento"
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Quitar campo
+          </button>
+          {current && !implicit ? (
+            <button
+              onClick={onUnassign}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-ink-secondary outline-none hover:bg-canvas-soft focus-visible:ring-2 focus-visible:ring-primary"
+              title="Quitar el vínculo con la columna (el campo se queda en el documento)"
+            >
+              <Unlink className="h-3.5 w-3.5" /> Desvincular
+            </button>
+          ) : null}
+        </div>
         <Button variant="ghost" onClick={onClose}>
           Cerrar
         </Button>
