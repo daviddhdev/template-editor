@@ -16,10 +16,12 @@ import { generatePdfFn, type PdfFile, type PdfJob } from '../server/pdf'
 import { generateGooglePdfFn, type GoogleFormat } from '../server/googlePdf'
 import { generateNativePdfFn, type NativeJob } from '../server/googleNative'
 import { driveUploadFn, ensureBatchFolderFn, type BatchFolder } from '../server/driveUpload'
+import { finishGenerationFn, startGenerationFn } from '../server/generationsDb'
 import type { GoogleStatus } from '../server/google'
 import type { NativeFallbackReason } from '../lib/nativeMerge'
 import { downloadDocument, downloadZip } from '../lib/download'
 import { batchFolderName } from '../lib/fileName'
+import { toGenerationDocs } from '../lib/generationLog'
 import { extractGoogleFolderId } from '../lib/url'
 import { useWorkspace } from '../state/workspaceStore'
 import { Button, Spinner, useDialogChrome } from './ui'
@@ -100,7 +102,9 @@ export function GenerateDialog({
   const [withDocx, setWithDocx] = useState(false)
   // Output folder is per template (saved with the recipe); the user pastes its
   // Drive URL. A template with a folder configured uploads by default.
-  const { outputFolderUrl, setOutputFolderUrl } = useWorkspace()
+  // savedRecipe/dataKind/dataUrl/data feed the generation audit log.
+  const { outputFolderUrl, setOutputFolderUrl, savedRecipe, dataKind, dataUrl, data } =
+    useWorkspace()
   const canWrite = google?.canWrite ?? false
   const [uploadToDrive, setUploadToDrive] = useState(
     () => outputFolderUrl.trim() !== '' && canWrite,
@@ -112,6 +116,12 @@ export function GenerateDialog({
   const batchFolderRef = useRef<BatchFolder | null>(null)
   const batchNameRef = useRef<string | null>(null)
   const [batchFolder, setBatchFolder] = useState<BatchFolder | null>(null)
+  /** Audit-log row of the current batch: promise of its id (start is fired
+   * without await so a slow/down DB never delays the first document). */
+  const runIdRef = useRef<Promise<string | null> | null>(null)
+  /** Mirror of `docs` — by the time a batch finishes, the closure state is
+   * stale; the ref always holds the latest per-document progress. */
+  const docsRef = useRef<DocProgress[] | null>(null)
   const cancelRef = useRef(false)
   const startRef = useRef(0)
   /** Elapsed ms accumulated across previous runs (pause/resume keeps total). */
@@ -147,7 +157,11 @@ export function GenerateDialog({
   }, [native, jobs])
 
   const patch = (i: number, p: Partial<DocProgress>) =>
-    setDocs((d) => (d ? d.map((doc, j) => (j === i ? { ...doc, ...p } : doc)) : d))
+    setDocs((d) => {
+      const next = d ? d.map((doc, j) => (j === i ? { ...doc, ...p } : doc)) : d
+      docsRef.current = next
+      return next
+    })
 
   async function callOne(
     unit: Unit,
@@ -235,6 +249,20 @@ export function GenerateDialog({
     }
   }
 
+  /** Finalise (or re-finalise after retries) the audit-log row. Best effort:
+   * a missing id (DB down at start) or a failed update never surfaces. */
+  async function logFinish() {
+    const id = await runIdRef.current?.catch(() => null)
+    if (!id || !docsRef.current) return
+    void finishGenerationFn({
+      data: {
+        id,
+        docs: toGenerationDocs(docsRef.current),
+        driveFolderUrl: batchFolderRef.current?.folderUrl ?? null,
+      },
+    }).catch(() => null)
+  }
+
   async function runOne(i: number, asHtml: boolean) {
     patch(i, { status: 'running', error: undefined })
     const t0 = Date.now()
@@ -256,6 +284,7 @@ export function GenerateDialog({
     const base =
       current ?? units.map((u): DocProgress => ({ name: u.name, status: 'pending', files: [] }))
     setDocs(base)
+    docsRef.current = base
     setRunning(true)
     cancelRef.current = false
     if (!current) {
@@ -265,6 +294,22 @@ export function GenerateDialog({
       batchFolderRef.current = null
       batchNameRef.current = null
       setBatchFolder(null)
+      // Open the audit row for the new batch ("Continuar" keeps the same one).
+      runIdRef.current = startGenerationFn({
+        data: {
+          recipeId: savedRecipe?.id ?? null,
+          templateName: savedRecipe?.name ?? (batchLabel || 'Sin nombre'),
+          route: viaNative ? 'native' : viaGoogle ? 'google_html' : 'local',
+          dataKind,
+          dataUrl,
+          rowCount: data?.rows.length ?? 0,
+          formats: withDocx && viaGoogle ? ['pdf', 'docx'] : ['pdf'],
+          actorEmail: google?.email ?? null,
+          docNames: units.map((u) => u.name),
+        },
+      })
+        .then((r) => (r.ok ? r.data.id : null))
+        .catch(() => null)
     }
     startRef.current = Date.now()
     for (let i = 0; i < units.length; i++) {
@@ -273,6 +318,7 @@ export function GenerateDialog({
       await runOne(i, false)
     }
     elapsedBase.current += Date.now() - startRef.current
+    void logFinish()
     setRunning(false)
   }
 
@@ -282,6 +328,7 @@ export function GenerateDialog({
     startRef.current = Date.now()
     await runOne(i, asHtml)
     elapsedBase.current += Date.now() - startRef.current
+    void logFinish()
     setRunning(false)
   }
 
@@ -295,6 +342,7 @@ export function GenerateDialog({
       if (docs[i].status === 'error') await runOne(i, true)
     }
     elapsedBase.current += Date.now() - startRef.current
+    void logFinish()
     setRunning(false)
   }
 
@@ -545,7 +593,7 @@ export function GenerateDialog({
                     ) : d.upload?.status === 'error' && !running ? (
                       <Button
                         variant="secondary"
-                        onClick={() => uploadDoc(i, d.files)}
+                        onClick={() => void uploadDoc(i, d.files).then(logFinish)}
                         title="Reintentar la subida a Drive"
                       >
                         <CloudUpload className="h-3.5 w-3.5" /> Reintentar subida

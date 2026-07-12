@@ -54,6 +54,31 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE recipes ADD COLUMN rule_bindings jsonb NOT NULL DEFAULT '{}'`,
   // Drive folder URL where generated documents are uploaded (per template).
   `ALTER TABLE recipes ADD COLUMN output_folder_url text NOT NULL DEFAULT ''`,
+  // Audit log: one row per generation batch. recipe_id has NO foreign key on
+  // purpose — the audit trail must survive template deletion and keep the
+  // literal id; template_name is a point-in-time snapshot for display.
+  // A row left in status 'running' without finished_at is evidence of an
+  // interrupted batch (browser closed mid-run). Append-only: never DELETE.
+  `CREATE TABLE generation_runs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    started_at timestamptz NOT NULL DEFAULT now(),
+    finished_at timestamptz,
+    status text NOT NULL DEFAULT 'running' CHECK (status IN ('running','done')),
+    recipe_id uuid,
+    template_name text NOT NULL,
+    route text NOT NULL CHECK (route IN ('native','google_html','local')),
+    data_kind text NOT NULL,
+    data_url text NOT NULL DEFAULT '',
+    row_count int NOT NULL DEFAULT 0,
+    formats text[] NOT NULL DEFAULT '{pdf}',
+    actor_email text,
+    drive_folder_url text,
+    doc_count int NOT NULL DEFAULT 0,
+    ok_count int NOT NULL DEFAULT 0,
+    error_count int NOT NULL DEFAULT 0,
+    docs jsonb NOT NULL DEFAULT '[]'
+  )`,
+  `CREATE INDEX generation_runs_started_at_idx ON generation_runs (started_at DESC)`,
 ]
 
 let client: postgres.Sql | null = null

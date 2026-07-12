@@ -1,7 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import type { Result } from './fetch'
 import type { DataSourceKind, Recipe } from '../types'
-import { optionalString, requireOneOf, requireRecord, requireString } from './validate'
+import { optionalString, requireOneOf, requireRecord, requireString, requireUuid } from './validate'
 
 /**
  * Template library (recipes) on Postgres — the durable, multi-user-ready home
@@ -61,11 +61,7 @@ function validRecipe(v: unknown): RecipeInput {
 
 /** UUID shape — a malformed id is a bad request, not a DB round-trip. */
 function validId(v: unknown): string {
-  const id = requireString(v, 'id')
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-    throw new Error('Petición inválida: el identificador no es válido.')
-  }
-  return id
+  return requireUuid(v, 'id')
 }
 
 /**

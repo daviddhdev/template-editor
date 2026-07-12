@@ -27,6 +27,22 @@ export function optionalString(v: unknown, what: string): string | undefined {
   return requireString(v, what)
 }
 
+export function requireInt(v: unknown, what: string): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
+    throw new ValidationError(`Petición inválida: «${what}» debe ser un número entero.`)
+  }
+  return v
+}
+
+/** UUID shape — a malformed id is a bad request, not a DB round-trip. */
+export function requireUuid(v: unknown, what: string): string {
+  const id = requireString(v, what)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new ValidationError(`Petición inválida: «${what}» no es un identificador válido.`)
+  }
+  return id
+}
+
 export function requireArray(v: unknown, what: string): unknown[] {
   if (!Array.isArray(v)) {
     throw new ValidationError(`Petición inválida: «${what}» debe ser una lista.`)

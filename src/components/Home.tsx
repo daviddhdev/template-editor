@@ -24,6 +24,7 @@ import {
   type RecipeSummary,
 } from '../server/recipesDb'
 import { loadDataIntoWorkspace } from '../lib/loadData'
+import { GenerationHistory } from './GenerationHistory'
 import { Button, ConfirmDialog, ErrorNote, Spinner, TextInput, Toast, useDialogChrome } from './ui'
 
 const dateFmt = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -272,6 +273,8 @@ export function HomeScreen() {
           </div>
         )}
       </section>
+
+      <GenerationHistory />
 
       {menuFor ? (
         <CardMenu
