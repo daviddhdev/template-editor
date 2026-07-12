@@ -9,6 +9,7 @@ import {
   ExternalLink,
   XCircle,
 } from 'lucide-react'
+import { authGuard } from '../lib/authRedirect'
 import { listGenerationsFn, type GenerationRunSummary } from '../server/generationsDb'
 import { Spinner } from './ui'
 
@@ -46,6 +47,7 @@ export function GenerationHistory() {
     listGenerationsFn()
       .then((res) => {
         if (!alive) return
+        authGuard(res)
         if (res.ok) setRuns(res.data)
         else setFailed(true)
       })

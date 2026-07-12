@@ -30,43 +30,56 @@ Elegido sobre SQLite porque la app se desplegará para varios departamentos
 (cliente `postgres` + migraciones numeradas mínimas aplicadas lazy al primer
 uso — tabla `schema_migrations`). La tabla `recipes` guarda la plantilla
 completa (HTML editado ~1 MB, CSS, orígenes, vínculos, agrupación) + miniatura
-PNG (`bytea`, generada con Playwright al guardar). Pendiente para el despliegue
-multi-departamento: auth + `user_id` (migración futura).
+PNG (`bytea`, generada con Playwright al guardar), y pertenece a un usuario
+(`owner_id` → `users`, cada uno ve solo lo suyo). `users` guarda también la
+conexión Google de cada persona (refresh token); `sessions` las sesiones de la
+app (cookie `ttg_session` httpOnly, 30 días deslizantes, solo el hash SHA-256
+del token en la DB).
 
 Las plantillas que existieran en localStorage (`ttg-recipes`, versión anterior)
 se **migran automáticamente** a la DB la primera vez que se abre la home con la
 DB disponible, y se vacía el almacén local.
 
-### Conexión con Google (paginación exacta + documentos privados)
+### Entrada con Google = login de la app (paginación exacta + documentos privados)
 
-Con una cuenta de Google conectada: (a) los PDF los genera **Google Docs**
-(mismo motor de maquetación que el documento original → saltos de página
-idénticos) y (b) la app puede **leer Docs y Sheets privados** a los que esa
-cuenta tenga acceso — ya no hace falta "cualquier persona con el enlace".
+La app es multiusuario: **entrar con Google ES el login**. El mismo
+consentimiento concede la identidad (sesión de la app) y los permisos de Drive:
+(a) los PDF los genera **Google Docs** con la cuenta del usuario (mismo motor
+de maquetación que el documento original → saltos de página idénticos) y
+(b) la app puede **leer Docs y Sheets privados** a los que esa cuenta tenga
+acceso — ya no hace falta "cualquier persona con el enlace".
 Configuración una sola vez:
 
 1. <https://console.cloud.google.com> → crea (o elige) un proyecto.
 2. "APIs y servicios" → "Biblioteca" → activa **Google Drive API** y
    **Google Sheets API** (Drive genera los PDF y lee Docs; Sheets lee hojas
    privadas respetando la pestaña `gid` del enlace).
-3. "Pantalla de consentimiento OAuth" → tipo Externo → añade tu cuenta como
-   usuario de prueba (no hace falta publicar la app).
+3. "Pantalla de consentimiento OAuth" → tipo **Interno**: solo miembros de tu
+   organización de Google Workspace pueden entrar. Además el servidor rechaza
+   cualquier email fuera de `ALLOWED_GOOGLE_HD` (`.env`).
 4. "Credenciales" → "Crear credenciales" → "ID de cliente de OAuth" → tipo
    "Aplicación web" → URI de redireccionamiento autorizado:
    `http://localhost:3000/oauth/callback`.
 5. Copia ID y secreto a `.env` (plantilla en `.env.example`) y reinicia el
    servidor.
 
-Después, botón **Conectar Google** (arriba a la derecha). La conexión se guarda
-en `.google-oauth.json` (gitignored) y sobrevive reinicios; **Desconectar** la
-revoca. Ámbitos pedidos: `drive.file` (crear/exportar/borrar los Docs temporales
-de la app) + `drive.readonly` (leer plantilla y datos privados; el API de Sheets
-lo acepta como scope de lectura) + `openid email` (mostrar la cuenta conectada).
-Una conexión hecha antes de existir `drive.readonly` no puede leer privados: el
-chip muestra **"Reconectar (permiso de lectura)"**.
+Sin sesión, cualquier ruta redirige a **/login** ("Entrar con Google"). El
+refresh token de cada usuario vive en su fila de `users` (la DB; sobrevive
+reinicios); **Cerrar sesión** solo borra la sesión de la app, no la conexión
+Drive. Ámbitos pedidos: `drive` completo (leer plantillas/datos privados,
+crear/exportar/borrar los Docs temporales y subir a carpetas elegidas por URL)
++ `openid email` (identidad). Una conexión antigua con menos permisos muestra
+en el chip **"Reconectar (permiso de lectura / permisos de Drive)"**; una
+revocada, **"Reconectar Google"** — reconectar es simplemente repetir el
+consentimiento (el refresh token nuevo sobrescribe el guardado).
 
-Lectura con fallback: conectado se intenta primero por API (privados OK); si esa
-cuenta no tiene acceso se prueba el export público. Sin conexión, solo público.
+Lectura con fallback: se intenta primero por API con la cuenta del usuario
+(privados OK); si esa cuenta no tiene acceso se prueba el export público.
+
+Todas las server functions exigen sesión (`requireUser`); sin ella devuelven
+`code: 'AUTH'` y el cliente redirige a /login. `recipes` y `generation_runs`
+se filtran siempre por `owner_id` (un id ajeno responde "ya no existe" — sin
+fuga de existencia).
 
 **OJO — los dos exports HTML de Google son distintos:** el público
 (`export?format=html`) trae un `<style>` con clases y la geometría de página en
@@ -219,12 +232,21 @@ src/
                            fallback al export público
     pdf.ts                 Server fn: HTML -> PDF con Playwright + zip (vía local)
     googleClient.ts        SOLO servidor (import dinámico): OAuth (auth URL,
-                           exchange, refresh, tokens en .google-oauth.json) +
-                           Drive (subir HTML como Doc temporal, exportar
-                           PDF/HTML, borrar) + Sheets API (leer pestaña como
-                           tabla, respetando gid)
-    google.ts              Server fns de conexión: estado, URL de consentimiento,
-                           canje del código, desconectar
+                           exchange con puerta de dominio, refresh por usuario
+                           con dedupe; tokens en la tabla users) + Drive (subir
+                           HTML como Doc temporal, exportar PDF/HTML, borrar) +
+                           Sheets API (leer pestaña como tabla, respetando gid)
+    google.ts              Server fns del login con Google: estado por usuario,
+                           URL de consentimiento, canje del código (upsert de
+                           usuario + crear sesión)
+    authHelpers.ts         Helpers puros de sesión (token, hash, cookie,
+                           dominio permitido) — con tests
+    session.ts             SOLO servidor: sesiones en DB + cookie ttg_session;
+                           requireUser()/AUTH_ERROR que usan todas las fns
+    usersDb.ts             SOLO servidor: tabla users (upsert en login, tokens
+                           Google por usuario)
+    auth.ts                Server fns de sesión: meFn (sonda del guard de
+                           rutas), logoutFn
     googlePdf.ts           Server fn: HTML -> PDF/DOCX vía Google (sube cada
                            documento resuelto convertido a Google Doc temporal,
                            exporta los formatos pedidos, borra)

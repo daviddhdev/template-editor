@@ -79,6 +79,38 @@ const MIGRATIONS: string[] = [
     docs jsonb NOT NULL DEFAULT '[]'
   )`,
   `CREATE INDEX generation_runs_started_at_idx ON generation_runs (started_at DESC)`,
+  // Multiusuario: el login es el OAuth de Google (scope drive + openid email).
+  // El refresh token vive POR USUARIO aquí — sustituye al .google-oauth.json
+  // global. En claro por ahora (cifrado en reposo = pendiente en TODO.md).
+  `CREATE TABLE users (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    email text NOT NULL UNIQUE,
+    google_refresh_token text,
+    google_access_token text,
+    google_access_expires_at timestamptz,
+    google_scopes text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_login_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  // Sesiones opacas: la cookie lleva el token; aquí solo su hash SHA-256.
+  // Las filas caducadas se purgan de forma oportunista en cada login.
+  `CREATE TABLE sessions (
+    token_hash text PRIMARY KEY,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+  )`,
+  // Plantillas por usuario. Las filas anteriores a la autenticación se borran
+  // (decisión confirmada: no existen plantillas compartidas), lo que permite
+  // owner_id NOT NULL desde el primer día.
+  `DELETE FROM recipes`,
+  `ALTER TABLE recipes ADD COLUMN owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE`,
+  `CREATE INDEX recipes_owner_idx ON recipes (owner_id, updated_at DESC)`,
+  // Historial por usuario. owner_id SIN foreign key a propósito (misma
+  // convención que recipe_id arriba): la auditoría sobrevive al borrado.
+  `DELETE FROM generation_runs`,
+  `ALTER TABLE generation_runs ADD COLUMN owner_id uuid NOT NULL`,
+  `CREATE INDEX generation_runs_owner_idx ON generation_runs (owner_id, started_at DESC)`,
 ]
 
 let client: postgres.Sql | null = null

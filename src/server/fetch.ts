@@ -13,8 +13,11 @@ import {
 } from '../lib/url'
 import { requireOneOf, requireRecord, requireString } from './validate'
 
-/** Discriminated result so the UI can show friendly errors without try/catch. */
-export type Result<T> = { ok: true; data: T } | { ok: false; error: string; hint?: string }
+/** Discriminated result so the UI can show friendly errors without try/catch.
+ * `code: 'AUTH'` = no session (or expired); the client redirects to /login. */
+export type Result<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; hint?: string; code?: 'AUTH' }
 
 type FetchError = { ok: false; error: string; hint?: string }
 
@@ -46,6 +49,9 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
     return { url: requireString(i.url, 'url') }
   })
   .handler(async ({ data }): Promise<Result<RawDocument>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     const id = extractGoogleId(data.url)
     if (!id) {
       return {
@@ -55,16 +61,16 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
       }
     }
 
-    // --- Authenticated read (Drive API) when an account is connected --------
+    // --- Authenticated read (Drive API) when the user's connection allows ---
     let authError: FetchError | null = null
     const g = await import('./googleClient')
-    const status = g.getStatus()
+    const status = await g.getStatusForUser(user.id)
     if (status.connected) {
       if (!status.canRead) {
         authError = RECONNECT_FOR_READ
       } else {
         try {
-          const token = await g.getAccessToken()
+          const token = await g.getAccessToken(user.id)
           // The PDF export carries Google's exact pagination, used to sync the
           // LOCAL fallback engine's page breaks (see pageSync.ts). Optional —
           // like the file name (the API's HTML export carries no <title>).
@@ -152,7 +158,7 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
     // Public exports usually serve their images without auth, but a connected
     // account that can read helps with restricted drawings.
     const inlineToken =
-      status.connected && status.canRead ? await g.getAccessToken().catch(() => null) : null
+      status.connected && status.canRead ? await g.getAccessToken(user.id).catch(() => null) : null
     doc.bodyHtml = await inlineRemoteImages(doc.bodyHtml, inlineToken)
 
     return { ok: true, data: doc }
@@ -172,19 +178,22 @@ export const fetchDataFn = createServerFn({ method: 'POST' })
     }
   })
   .handler(async ({ data }): Promise<Result<DataSourceData>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     let authError: FetchError | null = null
 
     if (data.kind === 'google_sheet') {
       const id = extractGoogleId(data.origin)
       if (id) {
         const g = await import('./googleClient')
-        const status = g.getStatus()
+        const status = await g.getStatusForUser(user.id)
         if (status.connected) {
           if (!status.canRead) {
             authError = RECONNECT_FOR_READ
           } else {
             try {
-              const token = await g.getAccessToken()
+              const token = await g.getAccessToken(user.id)
               const { columns, rows } = await g.readSheetTable(
                 token,
                 id,
@@ -235,14 +244,17 @@ export const listSheetTabsFn = createServerFn({ method: 'POST' })
     return { origin: requireString(i.origin, 'origin') }
   })
   .handler(async ({ data }): Promise<Result<SheetTab[]>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     const id = extractGoogleId(data.origin)
     if (!id) return { ok: true, data: [] }
 
     const g = await import('./googleClient')
-    const status = g.getStatus()
+    const status = await g.getStatusForUser(user.id)
     if (status.connected && status.canRead) {
       try {
-        const token = await g.getAccessToken()
+        const token = await g.getAccessToken(user.id)
         return { ok: true, data: await g.listSheetTabs(token, id) }
       } catch {
         // e.g. account cannot access this sheet — try the public page below.

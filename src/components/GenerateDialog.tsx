@@ -183,7 +183,7 @@ export function GenerateDialog({
       }
       if (unit.pdfJob) {
         const res = await generatePdfFn({ data: { jobs: [unit.pdfJob] } })
-        return { ok: true, files: res.files }
+        return res.ok ? { ok: true, files: res.data.files } : res
       }
       return { ok: false, error: 'Este documento no tiene contenido que generar.' }
     } catch {
@@ -304,7 +304,6 @@ export function GenerateDialog({
           dataUrl,
           rowCount: data?.rows.length ?? 0,
           formats: withDocx && viaGoogle ? ['pdf', 'docx'] : ['pdf'],
-          actorEmail: google?.email ?? null,
           docNames: units.map((u) => u.name),
         },
       })

@@ -25,6 +25,9 @@ export const generateGooglePdfFn = createServerFn({ method: 'POST' })
     return { jobs: requirePdfJobs(i.jobs), formats: optionalFormats(i.formats) }
   })
   .handler(async ({ data }): Promise<Result<PdfResult>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     const g = await import('./googleClient')
     const formats: GoogleFormat[] =
       data.formats && data.formats.length > 0 ? data.formats : ['pdf']
@@ -42,7 +45,7 @@ export const generateGooglePdfFn = createServerFn({ method: 'POST' })
         const html = emphasizeInlineStyles(job.html.replace(/\sdata-page-break="true"/g, ''))
 
         // Re-checked per job: a long batch can outlive one access token.
-        const token = await g.getAccessToken()
+        const token = await g.getAccessToken(user.id)
         const name = safeName(job.name)
         const fileId = await g.uploadHtmlAsDoc(token, name, html)
         try {

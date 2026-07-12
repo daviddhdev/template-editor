@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { safeName } from '../lib/fileName'
+import type { Result } from './fetch'
 import { requirePdfJobs, requireRecord } from './validate'
 
 /** One document to render: a display name and its standalone HTML. */
@@ -30,7 +31,10 @@ export const generatePdfFn = createServerFn({ method: 'POST' })
     const i = requireRecord(input, 'petición')
     return { jobs: requirePdfJobs(i.jobs) }
   })
-  .handler(async ({ data }): Promise<PdfResult> => {
+  .handler(async ({ data }): Promise<Result<PdfResult>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     const { acquireBrowser, releaseBrowser } = await import('./browserPool')
     const browser = await acquireBrowser()
     const files: PdfFile[] = []
@@ -82,5 +86,5 @@ export const generatePdfFn = createServerFn({ method: 'POST' })
 
     // No server-side zip: the dialog sends ONE job per request for live
     // progress and bundles the final zip in the browser (downloadAll).
-    return { files }
+    return { ok: true, data: { files } }
   })

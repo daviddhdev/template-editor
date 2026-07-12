@@ -3,7 +3,6 @@ import type { Result } from './fetch'
 import { countDocs, type GenerationDoc } from '../lib/generationLog'
 import {
   optionalFormats,
-  optionalString,
   requireArray,
   requireInt,
   requireOneOf,
@@ -83,22 +82,26 @@ export const startGenerationFn = createServerFn({ method: 'POST' })
       dataUrl: requireString(i.dataUrl, 'dataUrl'),
       rowCount: requireInt(i.rowCount, 'rowCount'),
       formats: optionalFormats(i.formats) ?? ['pdf'],
-      actorEmail: optionalString(i.actorEmail ?? undefined, 'actorEmail') ?? null,
       docNames: requireArray(i.docNames, 'docNames').map((n, k) =>
         requireString(n, `docNames[${k}]`),
       ),
     }
   })
   .handler(async ({ data }): Promise<Result<{ id: string }>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
       const docs: GenerationDoc[] = data.docNames.map((name) => ({ name, status: 'pending' }))
+      // actor_email is derived from the session (never client input): it is
+      // the audit's point-in-time snapshot of who ran the batch.
       const rows = await sql`
-        INSERT INTO generation_runs (recipe_id, template_name, route, data_kind, data_url,
-          row_count, formats, actor_email, doc_count, docs)
-        VALUES (${data.recipeId}, ${data.templateName}, ${data.route}, ${data.dataKind},
-          ${data.dataUrl}, ${data.rowCount}, ${data.formats}, ${data.actorEmail},
+        INSERT INTO generation_runs (owner_id, recipe_id, template_name, route, data_kind,
+          data_url, row_count, formats, actor_email, doc_count, docs)
+        VALUES (${user.id}, ${data.recipeId}, ${data.templateName}, ${data.route}, ${data.dataKind},
+          ${data.dataUrl}, ${data.rowCount}, ${data.formats}, ${user.email},
           ${data.docNames.length}, ${sql.json(docs as unknown as Parameters<typeof sql.json>[0])})
         RETURNING id`
       return { ok: true, data: { id: rows[0].id } }
@@ -123,6 +126,9 @@ export const finishGenerationFn = createServerFn({ method: 'POST' })
     }
   })
   .handler(async ({ data }): Promise<Result<null>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
@@ -133,23 +139,27 @@ export const finishGenerationFn = createServerFn({ method: 'POST' })
           ok_count = ${counts.ok}, error_count = ${counts.error},
           drive_folder_url = COALESCE(${data.driveFolderUrl}, drive_folder_url),
           finished_at = now(), status = 'done'
-        WHERE id = ${data.id}`
+        WHERE id = ${data.id} AND owner_id = ${user.id}`
       return { ok: true, data: null }
     } catch (err) {
       return dbError(err)
     }
   })
 
-/** Newest batches first, for the home-screen history section. */
+/** The user's newest batches first, for the home-screen history section. */
 export const listGenerationsFn = createServerFn({ method: 'GET' }).handler(
   async (): Promise<Result<GenerationRunSummary[]>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
       // No pagination yet (LIMIT 50). If this ever grows: paginate — this is
       // an audit trail, rows are never purged.
       const rows = await sql`
-        SELECT * FROM generation_runs ORDER BY started_at DESC LIMIT 50`
+        SELECT * FROM generation_runs WHERE owner_id = ${user.id}
+        ORDER BY started_at DESC LIMIT 50`
       return {
         ok: true,
         data: rows.map((r) => ({

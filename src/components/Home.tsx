@@ -24,7 +24,10 @@ import {
   type RecipeSummary,
 } from '../server/recipesDb'
 import { loadDataIntoWorkspace } from '../lib/loadData'
+import { authGuard } from '../lib/authRedirect'
+import { googleStatusFn, type GoogleStatus } from '../server/google'
 import { GenerationHistory } from './GenerationHistory'
+import { GoogleConnect } from './GoogleConnect'
 import { Button, ConfirmDialog, ErrorNote, Spinner, TextInput, Toast, useDialogChrome } from './ui'
 
 const dateFmt = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -59,7 +62,7 @@ export function HomeScreen() {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await listRecipesFn()
+      const res = authGuard(await listRecipesFn())
       if (res.ok) {
         setSummaries(res.data)
         setDbError(null)
@@ -72,6 +75,16 @@ export function HomeScreen() {
       setDbError({ error: 'No se pudo cargar la biblioteca de plantillas.' })
     }
   }, [])
+
+  // Session/Drive chip in the header (same as the editor's): shows who is
+  // logged in and offers reconnect when Drive permissions are missing.
+  const [google, setGoogle] = useState<GoogleStatus | null>(null)
+  const refreshGoogle = useCallback(() => {
+    googleStatusFn()
+      .then((res) => setGoogle(res.ok ? res.data : null))
+      .catch(() => setGoogle(null))
+  }, [])
+  useEffect(refreshGoogle, [refreshGoogle])
 
   // Hydrate the persisted stores, migrate any localStorage-era templates into
   // the database (one-time), then list the library.
@@ -169,6 +182,7 @@ export function HomeScreen() {
           >
             <FilePlus2 className="h-4 w-4" /> Nueva plantilla
           </Button>
+          <GoogleConnect status={google} onChanged={refreshGoogle} />
         </div>
       </header>
 

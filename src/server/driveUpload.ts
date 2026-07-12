@@ -35,9 +35,12 @@ export const ensureBatchFolderFn = createServerFn({ method: 'POST' })
     }
   })
   .handler(async ({ data }): Promise<Result<BatchFolder>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     const g = await import('./googleClient')
     try {
-      const token = await g.getAccessToken()
+      const token = await g.getAccessToken(user.id)
       if (!(await g.folderAlive(token, data.parentFolderId))) {
         return {
           ok: false,
@@ -59,7 +62,7 @@ export const ensureBatchFolderFn = createServerFn({ method: 'POST' })
 
 export type UploadResult =
   | { ok: true; data: { fileId: string } }
-  | { ok: false; error: string; hint?: string; code?: 'FOLDER_GONE' }
+  | { ok: false; error: string; hint?: string; code?: 'FOLDER_GONE' | 'AUTH' }
 
 /** Upload one generated document (as-is, no conversion) into a batch folder. */
 export const driveUploadFn = createServerFn({ method: 'POST' })
@@ -73,9 +76,12 @@ export const driveUploadFn = createServerFn({ method: 'POST' })
     }
   })
   .handler(async ({ data }): Promise<UploadResult> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     const g = await import('./googleClient')
     try {
-      const token = await g.getAccessToken()
+      const token = await g.getAccessToken(user.id)
       const bytes = new Uint8Array(Buffer.from(data.base64, 'base64'))
       const fileId = await g.withRetry(() =>
         g.uploadBinary(token, data.name, bytes, FORMAT_MIME[data.format], data.folderId),

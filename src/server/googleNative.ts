@@ -87,6 +87,9 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
     }
   })
   .handler(async ({ data }): Promise<Result<NativeResult>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     const g = await import('./googleClient')
     const formats: GoogleFormat[] =
       data.formats && data.formats.length > 0 ? data.formats : ['pdf']
@@ -94,8 +97,11 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
     const files: PdfFile[] = []
     const unmatched = new Set<string>()
     try {
-      let token = await g.getAccessToken()
-      const cached = sourceCache.get(data.sourceFileId)
+      let token = await g.getAccessToken(user.id)
+      // Cache key includes the user: two accounts can have DIFFERENT access
+      // to the same file id — a shared entry would leak bytes across them.
+      const cacheKey = `${user.id}:${data.sourceFileId}`
+      const cached = sourceCache.get(cacheKey)
       let sourceBytes: Uint8Array
       let uploadMime: string
       if (cached && Date.now() - cached.at < SOURCE_TTL_MS) {
@@ -109,14 +115,14 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
           : await g.downloadFileBytes(token, data.sourceFileId)
         uploadMime = isNativeDoc ? DOCX_MIME : meta.mimeType
         pruneSourceCache()
-        sourceCache.set(data.sourceFileId, { bytes: sourceBytes, mime: uploadMime, at: Date.now() })
+        sourceCache.set(cacheKey, { bytes: sourceBytes, mime: uploadMime, at: Date.now() })
       }
 
       // Sequential on purpose: predictable order and comfortably inside
       // Drive/Docs per-user rate limits even for large batches.
       for (const job of data.jobs) {
         // Re-checked per job: a long batch can outlive one access token.
-        token = await g.getAccessToken()
+        token = await g.getAccessToken(user.id)
         const name = safeName(job.name)
         const copyId = await g.withRetry(() => g.uploadAsGoogleDoc(token, name, sourceBytes, uploadMime))
         try {

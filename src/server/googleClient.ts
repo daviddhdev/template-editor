@@ -3,10 +3,11 @@
  * from inside server-function handlers (same pattern as playwright in pdf.ts)
  * so none of it ever reaches the client bundle.
  *
- * Auth model: single-user local tool. The OAuth "authorization code" flow runs
- * once in the browser (/oauth/callback route); the refresh token is persisted
- * to `.google-oauth.json` in the project root (gitignored) so the connection
- * survives server restarts.
+ * Auth model: the Google OAuth consent IS the app's login. Each exchange
+ * yields the user's identity (id_token) plus a refresh token, persisted PER
+ * USER in the users table (usersDb.ts) — google.ts turns that into an app
+ * session. This module stays a pure Google-API client: it never touches the
+ * sessions table.
  *
  * Why Drive upload instead of Docs API `replaceAllText` on a copy: the fields,
  * conditionals and repeatable sections live in the HTML edited IN THE APP, not
@@ -17,10 +18,8 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { unlink, writeFile } from 'node:fs/promises'
-import path from 'node:path'
 import { uniqueName } from '../lib/uniqueNames'
+import { domainAllowed } from './authHelpers'
 import { readDotEnv } from './env'
 
 /** drive.file: create/export/delete the app's own temp Docs.
@@ -84,49 +83,11 @@ function requireConfig(): GoogleConfig {
   return cfg
 }
 
-// ---------------------------------------------------------------------------
-// Token persistence
-// ---------------------------------------------------------------------------
-
-interface StoredTokens {
-  refreshToken: string
-  accessToken: string
-  /** Epoch ms after which accessToken must be refreshed. */
-  expiresAt: number
-  email: string | null
-  /** Space-separated scopes Google actually granted. Absent on connections
-   * made before read access existed — those need a reconnect to read. */
-  scopes?: string
-}
-
-const TOKEN_FILE = path.resolve(process.cwd(), '.google-oauth.json')
-
-let cachedTokens: StoredTokens | null | undefined
-
-function readTokens(): StoredTokens | null {
-  if (cachedTokens !== undefined) return cachedTokens
-  try {
-    cachedTokens = existsSync(TOKEN_FILE)
-      ? (JSON.parse(readFileSync(TOKEN_FILE, 'utf8')) as StoredTokens)
-      : null
-  } catch {
-    cachedTokens = null
-  }
-  return cachedTokens
-}
-
-async function saveTokens(tokens: StoredTokens): Promise<void> {
-  cachedTokens = tokens
-  await writeFile(TOKEN_FILE, JSON.stringify(tokens, null, 2), 'utf8')
-}
-
-async function clearTokens(): Promise<void> {
-  cachedTokens = null
-  try {
-    await unlink(TOKEN_FILE)
-  } catch {
-    /* already gone */
-  }
+/** Google Workspace domain allowed to log in (defense in depth over the OAuth
+ * app's "Internal" type). Empty/unset = anyone (dev only; exchange warns). */
+function allowedDomain(): string | undefined {
+  const env = { ...readDotEnv(), ...process.env }
+  return env.ALLOWED_GOOGLE_HD?.trim() || undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +119,10 @@ export function buildAuthUrl(origin: string): string {
     prompt: 'consent',
     state,
   })
+  // UX hint only (pre-filters Google's account picker); the authoritative
+  // domain check happens server-side in exchangeCode.
+  const hd = allowedDomain()
+  if (hd) params.set('hd', hd)
   return `${AUTH_ENDPOINT}?${params}`
 }
 
@@ -171,26 +136,52 @@ interface TokenResponse {
   error_description?: string
 }
 
-/** Email claim from an id_token JWT (no verification needed: it came to the
- * server straight from Google's token endpoint over TLS). */
-function emailFromIdToken(idToken: string | undefined): string | null {
-  if (!idToken) return null
+/** Identity claims from an id_token JWT (no verification needed: it came to
+ * the server straight from Google's token endpoint over TLS). */
+function claimsFromIdToken(idToken: string | undefined): {
+  email: string | null
+  emailVerified: boolean | undefined
+  hd: string | undefined
+} {
+  if (!idToken) return { email: null, emailVerified: undefined, hd: undefined }
   try {
     const payload = JSON.parse(Buffer.from(idToken.split('.')[1], 'base64url').toString('utf8'))
-    return typeof payload.email === 'string' ? payload.email : null
+    return {
+      email: typeof payload.email === 'string' ? payload.email : null,
+      emailVerified: typeof payload.email_verified === 'boolean' ? payload.email_verified : undefined,
+      hd: typeof payload.hd === 'string' ? payload.hd : undefined,
+    }
   } catch {
-    return null
+    return { email: null, emailVerified: undefined, hd: undefined }
   }
 }
 
-/** Exchange the callback's authorization code for tokens and persist them. */
-export async function exchangeCode(code: string, state: string): Promise<{ email: string | null }> {
+/** Tokens + identity from a completed login. google.ts persists them. */
+export interface ExchangedTokens {
+  email: string
+  refreshToken: string
+  accessToken: string
+  /** Epoch ms after which accessToken must be refreshed. */
+  expiresAt: number
+  scopes: string
+}
+
+/** Best-effort revoke of a token Google just issued (or a dead connection). */
+async function revokeToken(token: string): Promise<void> {
+  await fetch(`${REVOKE_ENDPOINT}?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+  }).catch(() => {})
+}
+
+/** Exchange the callback's authorization code for tokens + identity, gating
+ * on the allowed Workspace domain. Persisting is the caller's job. */
+export async function exchangeCode(code: string, state: string): Promise<ExchangedTokens> {
   const cfg = requireConfig()
   const pending = pendingStates.get(state)
   if (!pending || pending.expiresAt < Date.now()) {
     throw new GoogleError(
-      'La conexión con Google caducó o no se inició desde esta aplicación.',
-      'Vuelve a pulsar "Conectar Google" e inténtalo de nuevo.',
+      'La entrada con Google caducó o no se inició desde esta aplicación.',
+      'Vuelve a pulsar "Entrar con Google" e inténtalo de nuevo.',
     )
   }
   pendingStates.delete(state)
@@ -214,21 +205,42 @@ export async function exchangeCode(code: string, state: string): Promise<{ email
     )
   }
 
-  const email = emailFromIdToken(data.id_token)
-  await saveTokens({
+  const { email, emailVerified, hd } = claimsFromIdToken(data.id_token)
+  if (!email) {
+    // No identity — cannot create an account. Don't leave the grant dangling.
+    await revokeToken(data.refresh_token)
+    throw new GoogleError(
+      'Google no devolvió la identidad de la cuenta.',
+      'Inténtalo de nuevo; si persiste, revisa que el scope "email" esté permitido en Google Cloud Console.',
+    )
+  }
+  const allowed = allowedDomain()
+  if (!allowed) {
+    console.warn(
+      'ALLOWED_GOOGLE_HD no está definido: cualquier cuenta de Google puede entrar (solo aceptable en desarrollo).',
+    )
+  }
+  if (!domainAllowed(email, hd, emailVerified, allowed)) {
+    await revokeToken(data.refresh_token)
+    throw new GoogleError(
+      `Esta aplicación es solo para cuentas de ${allowed}.`,
+      'Entra con tu cuenta de Google del trabajo.',
+    )
+  }
+
+  return {
+    email,
     refreshToken: data.refresh_token,
     accessToken: data.access_token,
     expiresAt: Date.now() + (data.expires_in - 60) * 1000,
-    email,
-    scopes: data.scope,
-  })
-  return { email }
+    scopes: data.scope ?? '',
+  }
 }
 
 export interface GoogleStatus {
   /** Credentials present in .env — the connect button can work at all. */
   configured: boolean
-  /** A Google account is connected (refresh token stored). */
+  /** The user's Google connection is alive (refresh token stored). */
   connected: boolean
   /** The connection can READ private Docs/Sheets. False on connections made
    * before the read scope existed — the UI offers a reconnect. */
@@ -239,29 +251,20 @@ export interface GoogleStatus {
   email: string | null
 }
 
-export function getStatus(): GoogleStatus {
+export async function getStatusForUser(userId: string): Promise<GoogleStatus> {
+  const { readGoogleTokens } = await import('./usersDb')
+  const tokens = await readGoogleTokens(userId)
   // Exact-token match: FULL_SCOPE is a prefix of drive.file/drive.readonly,
   // so a substring check would report write access on old connections.
-  const granted = new Set(readTokens()?.scopes?.split(/\s+/) ?? [])
-  const tokens = readTokens()
+  const granted = new Set(tokens?.scopes.split(/\s+/) ?? [])
+  const connected = tokens?.refreshToken != null
   return {
     configured: loadConfig() !== null,
-    connected: tokens !== null,
-    canRead: granted.has(READ_SCOPE) || granted.has(FULL_SCOPE),
-    canWrite: granted.has(FULL_SCOPE),
-    email: tokens?.email ?? null,
+    connected,
+    canRead: connected && (granted.has(READ_SCOPE) || granted.has(FULL_SCOPE)),
+    canWrite: connected && granted.has(FULL_SCOPE),
+    email: null, // the session, not the Google connection, names the user now
   }
-}
-
-/** Revoke (best effort) and forget the stored connection. */
-export async function disconnect(): Promise<void> {
-  const tokens = readTokens()
-  if (tokens) {
-    await fetch(`${REVOKE_ENDPOINT}?token=${encodeURIComponent(tokens.refreshToken)}`, {
-      method: 'POST',
-    }).catch(() => {})
-  }
-  await clearTokens()
 }
 
 const RECONNECT = new GoogleError(
@@ -269,35 +272,60 @@ const RECONNECT = new GoogleError(
   'Vuelve a conectar tu cuenta de Google desde la barra superior.',
 )
 
-/** Valid access token, refreshing it against Google when expired. */
-export async function getAccessToken(): Promise<string> {
-  const cfg = requireConfig()
-  const tokens = readTokens()
-  if (!tokens) throw RECONNECT
-  if (tokens.expiresAt > Date.now()) return tokens.accessToken
+/** Per-user access-token cache. The DB row is the durable store; this only
+ * saves a SELECT per Google call on a single-node deploy. */
+const tokenCache = new Map<string, { accessToken: string; expiresAt: number }>()
+/** Concurrent-refresh dedupe: parallel jobs for one user share ONE refresh
+ * (racing refreshes can rate-limit or invalidate each other at Google). */
+const pendingRefresh = new Map<string, Promise<string>>()
 
-  const res = await fetch(TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      refresh_token: tokens.refreshToken,
-      client_id: cfg.clientId,
-      client_secret: cfg.clientSecret,
-      grant_type: 'refresh_token',
-    }),
-  })
-  const data = (await res.json()) as TokenResponse
-  if (!res.ok || !data.access_token) {
-    // Refresh token revoked/expired: the stored connection is dead.
-    await clearTokens()
-    throw RECONNECT
+/** Valid access token for the user, refreshing against Google when expired. */
+export async function getAccessToken(userId: string): Promise<string> {
+  const cached = tokenCache.get(userId)
+  if (cached && cached.expiresAt > Date.now()) return cached.accessToken
+
+  const pending = pendingRefresh.get(userId)
+  if (pending) return pending
+
+  const job = (async () => {
+    const cfg = requireConfig()
+    const { readGoogleTokens, saveAccessToken, clearGoogleTokens } = await import('./usersDb')
+    const tokens = await readGoogleTokens(userId)
+    if (!tokens?.refreshToken) throw RECONNECT
+    if (tokens.accessToken && tokens.expiresAt && tokens.expiresAt > Date.now()) {
+      tokenCache.set(userId, { accessToken: tokens.accessToken, expiresAt: tokens.expiresAt })
+      return tokens.accessToken
+    }
+
+    const res = await fetch(TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        refresh_token: tokens.refreshToken,
+        client_id: cfg.clientId,
+        client_secret: cfg.clientSecret,
+        grant_type: 'refresh_token',
+      }),
+    })
+    const data = (await res.json()) as TokenResponse
+    if (!res.ok || !data.access_token) {
+      // Refresh token revoked/expired: the stored connection is dead.
+      await clearGoogleTokens(userId)
+      tokenCache.delete(userId)
+      throw RECONNECT
+    }
+    const expiresAt = Date.now() + (data.expires_in - 60) * 1000
+    await saveAccessToken(userId, data.access_token, expiresAt)
+    tokenCache.set(userId, { accessToken: data.access_token, expiresAt })
+    return data.access_token
+  })()
+
+  pendingRefresh.set(userId, job)
+  try {
+    return await job
+  } finally {
+    pendingRefresh.delete(userId)
   }
-  await saveTokens({
-    ...tokens,
-    accessToken: data.access_token,
-    expiresAt: Date.now() + (data.expires_in - 60) * 1000,
-  })
-  return data.access_token
 }
 
 // ---------------------------------------------------------------------------

@@ -110,14 +110,18 @@ const summarize = (r: {
   thumbnail: r.thumbnail ? Buffer.from(r.thumbnail).toString('base64') : null,
 })
 
-/** The library, newest first (for the home grid). */
+/** The user's library, newest first (for the home grid). */
 export const listRecipesFn = createServerFn({ method: 'GET' }).handler(
   async (): Promise<Result<RecipeSummary[]>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
       const rows = await sql`
-        SELECT id, name, updated_at, thumbnail FROM recipes ORDER BY updated_at DESC`
+        SELECT id, name, updated_at, thumbnail FROM recipes
+        WHERE owner_id = ${user.id} ORDER BY updated_at DESC`
       return { ok: true, data: rows.map((r) => summarize(r as Parameters<typeof summarize>[0])) }
     } catch (err) {
       return dbError(err)
@@ -128,10 +132,15 @@ export const listRecipesFn = createServerFn({ method: 'GET' }).handler(
 export const getRecipeFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => ({ id: validId(requireRecord(input, 'petición').id) }))
   .handler(async ({ data }): Promise<Result<Recipe>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
-      const rows = await sql`SELECT * FROM recipes WHERE id = ${data.id}`
+      // owner check inside the WHERE: someone else's id looks identical to a
+      // deleted one (no existence leak).
+      const rows = await sql`SELECT * FROM recipes WHERE id = ${data.id} AND owner_id = ${user.id}`
       const r = rows[0]
       if (!r) return { ok: false, error: 'Esa plantilla ya no existe.' }
       return {
@@ -163,16 +172,19 @@ export const getRecipeFn = createServerFn({ method: 'POST' })
 export const saveRecipeFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => ({ recipe: validRecipe(requireRecord(input, 'petición').recipe) }))
   .handler(async ({ data }): Promise<Result<{ id: string }>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
       const r = data.recipe
       const thumbnail = await renderThumbnail(r)
       const rows = await sql`
-        INSERT INTO recipes (name, template_url, editor_html, editor_css, editor_title,
+        INSERT INTO recipes (owner_id, name, template_url, editor_html, editor_css, editor_title,
           editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
           source_file, output_folder_url, thumbnail)
-        VALUES (${r.name}, ${r.templateUrl}, ${r.editorHtml}, ${r.editorCss}, ${r.editorTitle},
+        VALUES (${user.id}, ${r.name}, ${r.templateUrl}, ${r.editorHtml}, ${r.editorCss}, ${r.editorTitle},
           ${r.editorBodyClass}, ${r.dataKind}, ${r.dataUrl}, ${sql.json(r.mapping)},
           ${sql.json(r.group as unknown as Parameters<typeof sql.json>[0])},
           ${sql.json((r.ruleBindings ?? {}) as unknown as Parameters<typeof sql.json>[0])},
@@ -192,6 +204,9 @@ export const updateRecipeFn = createServerFn({ method: 'POST' })
     return { id: validId(i.id), recipe: validRecipe(i.recipe) }
   })
   .handler(async ({ data }): Promise<Result<null>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
@@ -209,7 +224,7 @@ export const updateRecipeFn = createServerFn({ method: 'POST' })
           output_folder_url = ${r.outputFolderUrl ?? ''},
           thumbnail = ${thumbnail ?? null},
           updated_at = now()
-        WHERE id = ${data.id}
+        WHERE id = ${data.id} AND owner_id = ${user.id}
         RETURNING id`
       if (!rows[0]) {
         return {
@@ -230,12 +245,15 @@ export const renameRecipeFn = createServerFn({ method: 'POST' })
     return { id: validId(i.id), name: requireString(i.name, 'name') }
   })
   .handler(async ({ data }): Promise<Result<null>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
       await sql`
         UPDATE recipes SET name = ${data.name.trim() || 'Sin nombre'}, updated_at = now()
-        WHERE id = ${data.id}`
+        WHERE id = ${data.id} AND owner_id = ${user.id}`
       return { ok: true, data: null }
     } catch (err) {
       return dbError(err)
@@ -245,17 +263,20 @@ export const renameRecipeFn = createServerFn({ method: 'POST' })
 export const duplicateRecipeFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => ({ id: validId(requireRecord(input, 'petición').id) }))
   .handler(async ({ data }): Promise<Result<{ id: string }>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
       const rows = await sql`
-        INSERT INTO recipes (name, template_url, editor_html, editor_css, editor_title,
+        INSERT INTO recipes (owner_id, name, template_url, editor_html, editor_css, editor_title,
           editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
           source_file, output_folder_url, thumbnail)
-        SELECT name || ' (copia)', template_url, editor_html, editor_css, editor_title,
+        SELECT owner_id, name || ' (copia)', template_url, editor_html, editor_css, editor_title,
           editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
           source_file, output_folder_url, thumbnail
-        FROM recipes WHERE id = ${data.id}
+        FROM recipes WHERE id = ${data.id} AND owner_id = ${user.id}
         RETURNING id`
       if (!rows[0]) return { ok: false, error: 'Esa plantilla ya no existe.' }
       return { ok: true, data: { id: rows[0].id } }
@@ -267,10 +288,13 @@ export const duplicateRecipeFn = createServerFn({ method: 'POST' })
 export const deleteRecipeFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => ({ id: validId(requireRecord(input, 'petición').id) }))
   .handler(async ({ data }): Promise<Result<null>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
-      await sql`DELETE FROM recipes WHERE id = ${data.id}`
+      await sql`DELETE FROM recipes WHERE id = ${data.id} AND owner_id = ${user.id}`
       return { ok: true, data: null }
     } catch (err) {
       return dbError(err)
