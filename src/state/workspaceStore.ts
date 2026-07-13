@@ -12,8 +12,13 @@ import type {
   TagMapping,
 } from '../types'
 import type { RawDocument } from '../lib/template/parse'
-import { fingerprintCss, fingerprintHtml } from '../lib/fingerprint'
-import { tagLiterals, type SourceFileMeta } from '../lib/nativeMerge'
+import { fingerprintCss, fingerprintHtml, normalizeBodyHtml } from '../lib/fingerprint'
+import {
+  nativeTextSegments,
+  tagLiterals,
+  upgradeSourceFileMeta,
+  type SourceFileMeta,
+} from '../lib/nativeMerge'
 import { configureDraftStorage, draftStorage } from './draftStorage'
 
 /**
@@ -222,6 +227,7 @@ export const useWorkspace = create<WorkspaceState>()(
                 fingerprint: fingerprintHtml(raw.bodyHtml),
                 cssFingerprint: fingerprintCss(raw.css),
                 tagLiterals: tagLiterals(raw.bodyHtml),
+                textSegments: nativeTextSegments(normalizeBodyHtml(raw.bodyHtml)),
               }
             : null,
           view: 'edit',
@@ -342,7 +348,7 @@ export const useWorkspace = create<WorkspaceState>()(
           editorCss: r.editorCss,
           editorTitle: r.editorTitle,
           editorBodyClass: r.editorBodyClass,
-          sourceFile: r.sourceFile ?? null,
+          sourceFile: upgradeSourceFileMeta(r.sourceFile, r.editorHtml),
           dataKind: r.dataKind,
           dataUrl: r.dataUrl,
           data: null, // rows are per-batch: reloaded from the source each time
@@ -464,7 +470,12 @@ export async function rehydrateStores(user: { id: string; email: string }): Prom
   await Promise.resolve(useWorkspace.persist.rehydrate())
   await Promise.resolve(useRecipes.persist.rehydrate())
   const s = useWorkspace.getState()
-  if (s.editorHtml.trim()) useWorkspace.setState({ docToken: s.docToken + 1 })
+  if (s.editorHtml.trim()) {
+    useWorkspace.setState({
+      docToken: s.docToken + 1,
+      sourceFile: upgradeSourceFileMeta(s.sourceFile, s.editorHtml),
+    })
+  }
   resolveHydrated?.()
 }
 

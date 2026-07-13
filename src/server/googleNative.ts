@@ -2,7 +2,13 @@ import { createServerFn } from '@tanstack/react-start'
 import type { Result } from './fetch'
 import { safeName, type PdfFile, type PdfResult } from './pdf'
 import { FORMAT_MIME, type GoogleFormat } from './googlePdf'
-import { optionalFormats, requireArray, requireRecord, requireString } from './validate'
+import {
+  optionalFormats,
+  requireArray,
+  requireRecord,
+  requireString,
+  ValidationError,
+} from './validate'
 
 const DOCX_MIME = FORMAT_MIME.docx
 const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document'
@@ -14,9 +20,16 @@ export interface NativeReplacement {
   replace: string
 }
 
+export interface NativeEdit {
+  find: string
+  replace: string
+}
+
 /** One output document: display name + the tag substitutions for its group. */
 export interface NativeJob {
   name: string
+  /** Safe in-app text edits, applied before resolving template tags. */
+  edits?: NativeEdit[]
   replacements: NativeReplacement[]
 }
 
@@ -78,7 +91,15 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
           replace: requireString(rep.replace, 'replace'),
         }
       })
-      return { name: requireString(job.name, `jobs[${n}].name`), replacements }
+      const edits: NativeEdit[] = (job.edits === undefined ? [] : requireArray(job.edits, `jobs[${n}].edits`)).map(
+        (e, k) => {
+          const edit = requireRecord(e, `jobs[${n}].edits[${k}]`)
+          const find = requireString(edit.find, 'find')
+          if (!find) throw new ValidationError('Petición inválida: un cambio nativo no puede buscar texto vacío.')
+          return { find, replace: requireString(edit.replace, 'replace') }
+        },
+      )
+      return { name: requireString(job.name, `jobs[${n}].name`), edits, replacements }
     })
     return {
       sourceFileId: requireString(i.sourceFileId, 'sourceFileId'),
@@ -126,6 +147,18 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
         const name = safeName(job.name)
         const copyId = await g.withRetry(() => g.uploadAsGoogleDoc(token, name, sourceBytes, uploadMime))
         try {
+          if (job.edits?.length) {
+            const changed = await g.withRetry(() => g.replaceAllTextInDoc(token, copyId, job.edits!))
+            const ambiguous = changed.find((result) => result.occurrences !== 1)
+            if (ambiguous) {
+              throw new g.GoogleError(
+                'No se pudo aplicar con seguridad una edición al documento original.',
+                ambiguous.occurrences === 0
+                  ? 'El texto original cambió en Drive. Vuelve a cargar la plantilla antes de generar.'
+                  : 'Ese texto aparece varias veces en el original. Reintenta ese documento con la conversión HTML para evitar modificar el lugar equivocado.',
+              )
+            }
+          }
           const flat = job.replacements.flatMap((r) =>
             r.finds.map((find) => ({ tag: r.tag, find, replace: r.replace })),
           )

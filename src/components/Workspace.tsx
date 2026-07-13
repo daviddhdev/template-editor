@@ -15,6 +15,7 @@ import { TopBar } from './TopBar'
 import { GenerateDialog } from './GenerateDialog'
 import { GoogleConnect } from './GoogleConnect'
 import { PreviewFrame } from './PreviewFrame'
+import { NativePreviewFrame } from './NativePreviewFrame'
 import { SaveRecipeDialog } from './SaveRecipeDialog'
 import { ConfirmDialog, Toast } from './ui'
 
@@ -160,21 +161,38 @@ export function Workspace() {
     [generateOpen, plan],
   )
 
-  // Native route (generate from the ORIGINAL Drive file, exact fidelity) is
-  // only decided when the dialog opens: the check normalises the whole
-  // document HTML, too heavy to run on every keystroke. While the modal is
-  // open the document cannot change underneath it.
+  // Native route (materialise the ORIGINAL Drive file) is decided only while
+  // previewing or generating: the check normalises the whole document HTML,
+  // too heavy to run on every keystroke in edit mode.
+  const needsNativeDocument = generateOpen || view === 'preview'
   const nativeRoute = useMemo(
-    () => (generateOpen ? decideNativeRoute({ sourceFile, editorHtml, editorCss }) : null),
-    [generateOpen, sourceFile, editorHtml, editorCss],
+    () =>
+      needsNativeDocument ? decideNativeRoute({ sourceFile, editorHtml, editorCss }) : null,
+    [needsNativeDocument, sourceFile, editorHtml, editorCss],
   )
   const native = useMemo(
     () =>
       generateOpen && plan && sourceFile && nativeRoute?.eligible
-        ? { sourceFileId: sourceFile.id, jobs: buildNativeJobs(plan, sourceFile.tagLiterals) }
+        ? {
+            sourceFileId: sourceFile.id,
+            jobs: buildNativeJobs(plan, sourceFile.tagLiterals, nativeRoute.edits),
+          }
         : null,
     [generateOpen, plan, sourceFile, nativeRoute],
   )
+  const nativePreviewJob = useMemo(() => {
+    if (
+      view !== 'preview' ||
+      !plan ||
+      !sourceFile ||
+      !nativeRoute?.eligible ||
+      !currentGroup
+    )
+      return null
+    return buildNativeJobs(plan, sourceFile.tagLiterals, nativeRoute.edits)[
+      Math.min(previewIndex, previewGroups.length - 1)
+    ] ?? null
+  }, [view, plan, sourceFile, nativeRoute, currentGroup, previewIndex, previewGroups.length])
 
   const fieldsState: StepState =
     !template || totalTags === 0 ? 'muted' : unbound.length > 0 ? 'warn' : 'ok'
@@ -277,7 +295,16 @@ export function Workspace() {
                 </label>
               ) : null}
               {currentPreviewHtml ? (
-                <PreviewFrame html={currentPreviewHtml} className="min-h-0 flex-1" />
+                google?.connected && sourceFile && nativePreviewJob ? (
+                  <NativePreviewFrame
+                    sourceFileId={sourceFile.id}
+                    job={nativePreviewJob}
+                    fallbackHtml={currentPreviewHtml}
+                    className="min-h-0 flex-1"
+                  />
+                ) : (
+                  <PreviewFrame html={currentPreviewHtml} className="min-h-0 flex-1" />
+                )
               ) : (
                 <p className="text-sm text-ink-faint">Nada que previsualizar todavía.</p>
               )}

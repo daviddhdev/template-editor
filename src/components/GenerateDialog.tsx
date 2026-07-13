@@ -33,7 +33,7 @@ const FALLBACK_EXPLANATION: Record<NativeFallbackReason, string> = {
   inline_blocks:
     'Has insertado elementos sueltos en el documento (campo, texto condicional o sección repetible), así que se usará la conversión HTML. Para mantener la fidelidad exacta, escribe un {{campo}} en el documento de Google y vincúlalo desde la app (también a un texto condicional o una sección repetible).',
   edited:
-    'Has modificado el texto del documento en la app, así que se usará la conversión HTML (el aspecto puede variar ligeramente respecto al original).',
+    'Hay cambios de estructura, formato o texto repetido que no se pueden trasladar con seguridad al original, así que se usará la conversión HTML (el aspecto puede variar ligeramente).',
   css_changed:
     'Has cambiado los márgenes en la app, así que se usará la conversión HTML (la generación desde el original los ignoraría).',
 }
@@ -87,8 +87,8 @@ export function GenerateDialog({
   onClose,
 }: {
   jobs: PdfJob[]
-  /** Present when the document is untouched since import: generate from the
-   * original Drive file instead of the resolved HTML. */
+  /** Present when the document is unchanged or its edits can be applied
+   * safely to the original Drive file. */
   native?: { sourceFileId: string; jobs: NativeJob[] } | null
   /** Why `native` is not available (shown so the fidelity change is visible). */
   nativeFallbackReason?: NativeFallbackReason | null

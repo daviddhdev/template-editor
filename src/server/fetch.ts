@@ -3,6 +3,7 @@ import type { DataSourceData, DataSourceKind } from '../types'
 import { createDataSource, DataSourceError } from '../lib/datasource'
 import { extractDocument, type RawDocument } from '../lib/template/parse'
 import { annotatePageBreaks, extractPageStartTexts } from '../lib/template/pageSync'
+import { repairFloatingHeaders } from '../lib/template/repairFloatingHeaders'
 import { inlineRemoteImages } from './inlineImages'
 import {
   extractGoogleId,
@@ -91,6 +92,9 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
           // Last mutation before storing: make the document self-contained
           // (Google's drawing/image URLs are auth-bound and ephemeral).
           doc.bodyHtml = await inlineRemoteImages(doc.bodyHtml, token)
+          const repaired = repairFloatingHeaders(doc)
+          doc.bodyHtml = repaired.bodyHtml
+          doc.css = repaired.css
           return { ok: true, data: doc }
         } catch (err) {
           // Remember why and fall back to the public export: the doc may be
@@ -160,6 +164,9 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
     const inlineToken =
       status.connected && status.canRead ? await g.getAccessToken(user.id).catch(() => null) : null
     doc.bodyHtml = await inlineRemoteImages(doc.bodyHtml, inlineToken)
+    const repaired = repairFloatingHeaders(doc)
+    doc.bodyHtml = repaired.bodyHtml
+    doc.css = repaired.css
 
     return { ok: true, data: doc }
   })
