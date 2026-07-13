@@ -114,6 +114,36 @@ describe('decideNativeRoute', () => {
     ).toEqual({ eligible: false, reason: 'css_changed' })
   })
 
+  it('falls back only while an anchored rule contains explicit rich formatting', () => {
+    const plainRule = {
+      id: 'r',
+      label: 'R',
+      branches: [],
+      defaultText: 'Texto',
+    }
+    const base = { sourceFile: meta(), editorHtml: '<p>{{TAG}}</p>', editorCss: 'p{color:red}' }
+    expect(
+      decideNativeRoute({
+        ...base,
+        ruleBindings: { TAG: { rule: plainRule, perRow: false } },
+      }),
+    ).toEqual({ eligible: true, edits: [] })
+    expect(
+      decideNativeRoute({
+        ...base,
+        ruleBindings: {
+          TAG: {
+            rule: {
+              ...plainRule,
+              defaultTextHtml: '<p><span style="font-weight:bold">Texto</span></p>',
+            },
+            perRow: false,
+          },
+        },
+      }),
+    ).toEqual({ eligible: false, reason: 'formatted_rule' })
+  })
+
   it('keeps native output for unique text edits inside the same element', () => {
     expect(
       decideNativeRoute({

@@ -5,12 +5,10 @@ import { formatTagValue } from './format'
 /**
  * PLAIN-TEXT tag resolution, shared by all three generation routes.
  *
- * A rule-bound tag (see {@link RuleBindings}) substitutes to the resolved text
- * of its rule: branch texts are plain text whose {{tags}} resolve to COLUMN
- * values only (no rule-in-rule nesting). Everything here returns plain text —
- * the HTML route escapes it afterwards; the native route hands it verbatim to
- * replaceAllText, where '\n' becomes a paragraph break (the same behaviour the
- * team's previous Apps Script flow relied on).
+ * A rule-bound tag (see {@link RuleBindings}) always keeps a plain-text form
+ * whose {{tags}} resolve to COLUMN values only (no rule-in-rule nesting).
+ * Everything here returns that form for the native route; the HTML route may
+ * use the optional sanitised rich sidecar through substitute.ts.
  */
 
 export interface PlainSubOptions {
@@ -67,10 +65,23 @@ export function resolveRuleText(
   row: Record<string, string>,
   opts: PlainSubOptions,
 ): string {
-  const match = rule.branches.find((br) => branchMatches(br, row))
-  const chosen = match ? match.text : (rule.defaultText ?? '')
+  const chosen = chooseRuleContent(rule, row).text
   if (!chosen.trim()) return ''
   return substitutePlainTags(chosen, row, opts)
+}
+
+/** Selected plain/rich pair for a row; shared by HTML and native resolution. */
+export function chooseRuleContent(
+  rule: ConditionalRule,
+  row: Record<string, string>,
+): { text: string; html?: string } {
+  const match = rule.branches.find((br) => branchMatches(br, row))
+  return match
+    ? { text: match.text, ...(match.textHtml ? { html: match.textHtml } : {}) }
+    : {
+        text: rule.defaultText ?? '',
+        ...(rule.defaultTextHtml ? { html: rule.defaultTextHtml } : {}),
+      }
 }
 
 /**

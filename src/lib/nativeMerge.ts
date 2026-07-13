@@ -12,12 +12,13 @@
  */
 
 import { HTMLElement, parse, TextNode } from 'node-html-parser'
-import type { GenerationPlan } from '../types'
+import type { GenerationPlan, RuleBindings } from '../types'
 import type { NativeJob, NativeReplacement } from '../server/googleNative'
 import { formatTagValue } from './engine/format'
 import { resolveBoundTag } from './engine/tagValue'
 import { fingerprintCss, fingerprintHtml, hashString, normalizeBodyHtml } from './fingerprint'
 import { planGroups } from './plan'
+import { bindingsHaveRichFormatting } from './richText'
 
 /** What `loadRawDocument` captures about the imported Drive file. */
 export interface SourceFileMeta {
@@ -200,13 +201,16 @@ export type NativeFallbackReason =
   | 'edited'
   /** CSS changed (ruler margins) — the native output would not reflect it. */
   | 'css_changed'
+  /** A rule-bound tag contains partial rich formatting. */
+  | 'formatted_rule'
 
 export function decideNativeRoute(args: {
   sourceFile: SourceFileMeta | null
   editorHtml: string
   editorCss: string
+  ruleBindings?: RuleBindings
 }): { eligible: true; edits: NativeEdit[] } | { eligible: false; reason: NativeFallbackReason } {
-  const { sourceFile, editorHtml, editorCss } = args
+  const { sourceFile, editorHtml, editorCss, ruleBindings } = args
   if (!sourceFile) return { eligible: false, reason: 'no_source' }
   // In-app inline constructs make the route wrong regardless of what the
   // fingerprint says (independent of serialisation quirks) — and they get
@@ -217,6 +221,9 @@ export function decideNativeRoute(args: {
     editorHtml.includes('ttg-chip')
   ) {
     return { eligible: false, reason: 'inline_blocks' }
+  }
+  if (bindingsHaveRichFormatting(ruleBindings)) {
+    return { eligible: false, reason: 'formatted_rule' }
   }
   if (fingerprintCss(editorCss) !== sourceFile.cssFingerprint) {
     return { eligible: false, reason: 'css_changed' }

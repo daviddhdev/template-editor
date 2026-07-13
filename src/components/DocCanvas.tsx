@@ -20,10 +20,11 @@ import {
 } from '../lib/editorHtml'
 import { decodeCond } from '../lib/cond'
 import { effectiveMapping } from '../lib/plan'
+import { sanitizeConditionalTextStyle } from '../lib/richText'
 import { uid } from '../lib/uid'
-import type { ConditionalRule } from '../types'
+import type { ConditionalRule, ConditionalTextStyle } from '../types'
 import { BindFieldPopover } from './BindFieldPopover'
-import { CondEditor } from './CondEditor'
+import { CondEditor, type RichTextSelection } from './CondEditor'
 import { FORMAT_LABEL, FormatToolbar } from './FormatToolbar'
 import { MarginRuler } from './MarginRuler'
 import { Button, ConfirmDialog } from './ui'
@@ -155,6 +156,91 @@ function rangeFromPoint(doc: Document, x: number, y: number): Range | null {
   return r
 }
 
+/** The run that carries the visible font in Google exports, or the block. */
+function textStyleSource(el: HTMLElement): HTMLElement {
+  // The chip's blue colour/background are editor chrome; its parent is the
+  // original document run whose typography the generated rule must inherit.
+  if (el.classList.contains('ttg-chip')) return el.parentElement ?? el
+  const runs = Array.from(el.querySelectorAll<HTMLElement>('span[class], span[style]')).filter(
+    (run) => !run.closest('.ttg-chip, .ttg-cond'),
+  )
+  return runs.at(-1) ?? el
+}
+
+function capturedTextStyle(el: HTMLElement | null): ConditionalTextStyle | undefined {
+  if (!el) return undefined
+  const source = textStyleSource(el)
+  const win = source.ownerDocument.defaultView
+  if (!win) return undefined
+  const computed = win.getComputedStyle(source)
+  return sanitizeConditionalTextStyle({
+    fontFamily: computed.fontFamily,
+    fontSize: computed.fontSize,
+    lineHeight: computed.lineHeight,
+    color: computed.color,
+  })
+}
+
+function applyCapturedTextStyle(
+  el: HTMLElement,
+  style: ConditionalTextStyle | undefined,
+): boolean {
+  if (!style) return false
+  let changed = false
+  if (style.fontFamily && !el.style.fontFamily) {
+    el.style.fontFamily = style.fontFamily
+    changed = true
+  }
+  if (style.fontSize && !el.style.fontSize) {
+    el.style.fontSize = style.fontSize
+    changed = true
+  }
+  if (style.lineHeight && !el.style.lineHeight) {
+    el.style.lineHeight = style.lineHeight
+    changed = true
+  }
+  if (style.color && !el.style.color) {
+    el.style.color = style.color
+    changed = true
+  }
+  return changed
+}
+
+/** Nearby content, crossing repeat-wrapper boundaries and skipping chrome. */
+function adjacentContent(el: HTMLElement, direction: 'previous' | 'next'): HTMLElement | null {
+  let candidate =
+    direction === 'previous'
+      ? (el.previousElementSibling as HTMLElement | null)
+      : (el.nextElementSibling as HTMLElement | null)
+  if (!candidate && el.parentElement?.getAttribute('data-ttg-repeat') === 'true') {
+    const wrapper = el.parentElement
+    candidate =
+      direction === 'previous'
+        ? (wrapper.previousElementSibling as HTMLElement | null)
+        : (wrapper.nextElementSibling as HTMLElement | null)
+  }
+  while (candidate?.classList.contains('ttg-cond')) {
+    candidate =
+      direction === 'previous'
+        ? (candidate.previousElementSibling as HTMLElement | null)
+        : (candidate.nextElementSibling as HTMLElement | null)
+  }
+  if (candidate?.getAttribute('data-ttg-repeat') === 'true') {
+    return (direction === 'previous' ? candidate.lastElementChild : candidate.firstElementChild) as
+      | HTMLElement
+      | null
+  }
+  return candidate
+}
+
+function nearbyTextStyle(el: HTMLElement): ConditionalTextStyle | undefined {
+  return (
+    capturedTextStyle(adjacentContent(el, 'previous')) ??
+    capturedTextStyle(adjacentContent(el, 'next')) ??
+    capturedTextStyle(el.ownerDocument.body)
+  )
+}
+
 /** Imperative surface the palette / panels use to act on the document. */
 export interface DocCanvasHandle {
   /** Insert a field chip at the cursor (or at the end when no cursor). */
@@ -167,6 +253,8 @@ export interface DocCanvasHandle {
   toggleRepeat: () => void
   /** Insert a new inline conditional after the cursor block and open its editor. */
   insertConditional: () => void
+  /** Open a new anchored conditional/repeat rule for an existing {{tag}}. */
+  openRuleEditor: (tag: string) => void
 }
 
 /**
@@ -197,6 +285,9 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const savedRange = useRef<Range | null>(null)
+  /** Selection inside a conditional dialog; formatting commands prefer it
+   * over the saved iframe range until the dialog closes. */
+  const richFormatTarget = useRef<RichTextSelection | null>(null)
   /** Field-binding popover: which chip was clicked (element kept so the
    * popover can also REMOVE the field from the document). */
   const [bindTag, setBindTag] = useState<{ tag: string; el: HTMLElement } | null>(null)
@@ -324,36 +415,27 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     if ((tag !== 'p' && tag !== 'div') || block.className || block.hasAttribute('data-cond')) return
     if (isRepeatWrapper(block)) return
 
-    // Previous CONTENT block with styling: skip editor chrome; a repeat
-    // wrapper as neighbour contributes its LAST block; the first block of a
-    // section looks at the block just before the section.
-    let prev = block.previousElementSibling as HTMLElement | null
-    if (!prev && isRepeatWrapper(block.parentElement)) {
-      prev = block.parentElement!.previousElementSibling as HTMLElement | null
-    }
-    while (prev) {
-      if (isRepeatWrapper(prev)) {
-        prev = prev.lastElementChild as HTMLElement | null
-        continue
-      }
-      if (prev.classList.contains('ttg-cond')) {
-        prev = prev.previousElementSibling as HTMLElement | null
-        continue
-      }
-      if (prev.className || prev.getAttribute('style')) break
-      prev = prev.previousElementSibling as HTMLElement | null
-    }
-    if (!prev) return
-    if (prev.className) block.className = prev.className
+    // Prefer previous content, then following content (important for a new
+    // first line), then the repeat wrapper/body. Computed style is copied as
+    // a minimal fallback even when the source font only exists in CSS.
+    const reference = adjacentContent(block, 'previous') ?? adjacentContent(block, 'next')
+    if (reference?.className) block.className = reference.className
     // Drive-API exports carry the paragraph's geometry as inline style.
-    if (!block.getAttribute('style') && prev.getAttribute('style')) {
-      block.setAttribute('style', prev.getAttribute('style')!)
+    if (!block.getAttribute('style') && reference?.getAttribute('style')) {
+      block.setAttribute('style', reference.getAttribute('style')!)
     }
+    applyCapturedTextStyle(
+      block,
+      capturedTextStyle(reference) ??
+        capturedTextStyle(isRepeatWrapper(block.parentElement) ? block.parentElement : doc.body),
+    )
 
     // Reference run: public exports style runs with classes, Drive-API
     // exports with inline styles — accept either (the FONT lives there, so
     // without this the typed text falls back to the browser default).
-    const refSpan = Array.from(prev.querySelectorAll<HTMLElement>('span[class], span[style]'))
+    const refSpan = Array.from(
+      reference?.querySelectorAll<HTMLElement>('span[class], span[style]') ?? [],
+    )
       .filter((s) => !s.classList.contains('ttg-chip'))
       .pop()
     if (!refSpan) return
@@ -444,7 +526,8 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
 
   /** Toolbar state: which inline formats apply at the current caret. */
   const refreshFmt = useCallback(() => {
-    const doc = editorDoc()
+    const rich = richFormatTarget.current
+    const doc = rich?.element.isConnected ? rich.element.ownerDocument : editorDoc()
     if (!doc) return
     const states: Record<string, boolean> = {}
     for (const cmd of ['bold', 'italic', 'underline', 'justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull']) {
@@ -457,6 +540,14 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     setFmt(states)
   }, [])
 
+  const handleRichSelection = useCallback(
+    (selection: RichTextSelection | null) => {
+      richFormatTarget.current = selection
+      refreshFmt()
+    },
+    [refreshFmt],
+  )
+
   /**
    * Apply an inline/paragraph format to the current selection. The toolbar
    * lives OUTSIDE the iframe, so the saved selection is restored first;
@@ -465,6 +556,27 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
    */
   const execFormat = useCallback(
     (command: string) => {
+      const rich = richFormatTarget.current
+      if (rich?.element.isConnected) {
+        const doc = rich.element.ownerDocument
+        const win = doc.defaultView
+        const sel = win?.getSelection()
+        if (!win || !sel) return
+        rich.element.focus()
+        sel.removeAllRanges()
+        sel.addRange(rich.range)
+        try {
+          doc.execCommand('styleWithCSS', false, 'true')
+        } catch {
+          /* best effort, matching the iframe editor */
+        }
+        doc.execCommand(command)
+        if (sel.rangeCount) rich.range = sel.getRangeAt(0).cloneRange()
+        rich.sync()
+        refreshFmt()
+        return
+      }
+
       const doc = editorDoc()
       const win = editorWin()
       if (!doc || !win) return
@@ -589,6 +701,9 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     const startBlock = topBlockOf(boundaryNode(range.startContainer, range.startOffset))
     const endBlock = topBlockOf(boundaryNode(range.endContainer, range.endOffset, true))
     if (!startBlock) return
+    const repeatStyle = startBlock.classList.contains('ttg-cond')
+      ? nearbyTextStyle(startBlock)
+      : capturedTextStyle(startBlock)
     checkpointFlushed('Sección repetible')
 
     // Repeating only has meaning when several rows feed one document. If the
@@ -604,6 +719,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       // repeatable section.
       const wrapper = doc.createElement('div')
       wrapper.setAttribute('data-ttg-repeat', 'true')
+      applyCapturedTextStyle(wrapper, repeatStyle)
       doc.body.insertBefore(wrapper, startBlock)
       let node: Node | null = startBlock
       while (node) {
@@ -617,7 +733,18 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       if (el.getAttribute('data-ttg-repeat') === 'true') {
         if (el.tagName === 'DIV' && el.children.length > 0 && !el.getAttribute('data-cond')) {
           // A wrapper section: unwrap its blocks back into the body.
-          while (el.firstChild) doc.body.insertBefore(el.firstChild, el)
+          const wrapperStyle = sanitizeConditionalTextStyle({
+            fontFamily: el.style.fontFamily,
+            fontSize: el.style.fontSize,
+            lineHeight: el.style.lineHeight,
+            color: el.style.color,
+          })
+          while (el.firstChild) {
+            if (el.firstChild.nodeType === Node.ELEMENT_NODE) {
+              applyCapturedTextStyle(el.firstChild as HTMLElement, wrapperStyle)
+            }
+            doc.body.insertBefore(el.firstChild, el)
+          }
           el.remove()
         } else {
           el.removeAttribute('data-ttg-repeat')
@@ -629,6 +756,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         // box, background narrower than the page).
         const wrapper = doc.createElement('div')
         wrapper.setAttribute('data-ttg-repeat', 'true')
+        applyCapturedTextStyle(wrapper, repeatStyle)
         doc.body.insertBefore(wrapper, el)
         wrapper.appendChild(el)
       }
@@ -640,13 +768,14 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     }
   }, [cursorRange, topBlockOf, boundaryNode, checkpointFlushed, persist])
 
-  const freshRule = useCallback((): ConditionalRule => {
+  const freshRule = useCallback((textStyle?: ConditionalTextStyle): ConditionalRule => {
     const columns = useWorkspace.getState().data?.columns ?? []
     return {
       id: uid(),
       label: 'Texto condicional',
       branches: [{ id: uid(), column: columns[0] ?? '', operator: 'equals', value: '', text: '' }],
       defaultText: '',
+      ...(textStyle ? { textStyle } : {}),
     }
   }, [])
 
@@ -656,7 +785,12 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       const doc = editorDoc()
       if (!doc) return
       checkpointFlushed('Texto condicional añadido')
-      const rule = freshRule()
+      const textStyle = after
+        ? after.classList.contains('ttg-cond')
+          ? nearbyTextStyle(after)
+          : capturedTextStyle(after)
+        : capturedTextStyle(doc.body)
+      const rule = freshRule(textStyle)
       const el = makeCondElement(rule, doc)
       if (after) after.insertAdjacentElement('afterend', el)
       else doc.body.appendChild(el)
@@ -664,6 +798,26 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       setEditingCond({ el, rule })
     },
     [checkpointFlushed, freshRule, persist],
+  )
+
+  const openRuleEditor = useCallback(
+    (tag: string) => {
+      const doc = editorDoc()
+      if (!doc) return
+      const chip = Array.from(doc.body.querySelectorAll<HTMLElement>('.ttg-chip')).find(
+        (candidate) => candidate.dataset.field === tag,
+      )
+      const existing = useWorkspace.getState().ruleBindings[tag]
+      const textStyle = capturedTextStyle(chip ?? doc.body)
+      const rule = existing?.rule ?? freshRule(textStyle)
+      setBindingRule({
+        tag,
+        rule: rule.textStyle || !textStyle ? rule : { ...rule, textStyle },
+        perRow: existing?.perRow ?? false,
+        existing: Boolean(existing),
+      })
+    },
+    [freshRule],
   )
 
   useImperativeHandle(
@@ -686,8 +840,17 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       },
       toggleRepeat,
       insertConditional: () => insertCondAfter(cursorBlock()),
+      openRuleEditor,
     }),
-    [checkpointFlushed, cursorRange, insertFieldAtRange, toggleRepeat, insertCondAfter, cursorBlock],
+    [
+      checkpointFlushed,
+      cursorRange,
+      insertFieldAtRange,
+      toggleRepeat,
+      insertCondAfter,
+      cursorBlock,
+      openRuleEditor,
+    ],
   )
 
   // (Re)write the iframe whenever a new source doc is loaded, and on mount.
@@ -707,6 +870,27 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     } catch {
       /* non-blocking */
     }
+
+    // Recipes created before rich rule text did not persist a font context,
+    // and old repeat wrappers could contain classless paragraphs. Repair both
+    // from their nearest real document content without adding an undo entry.
+    let repairedStyleContext = false
+    for (const cond of body.querySelectorAll<HTMLElement>('.ttg-cond[data-cond]')) {
+      const rule = decodeCond(cond.getAttribute('data-cond') ?? '')
+      if (!rule || rule.textStyle) continue
+      const textStyle = nearbyTextStyle(cond)
+      if (!textStyle) continue
+      applyCondToElement(cond, { ...rule, textStyle })
+      repairedStyleContext = true
+    }
+    for (const wrapper of body.querySelectorAll<HTMLElement>('[data-ttg-repeat="true"]')) {
+      const first = wrapper.firstElementChild as HTMLElement | null
+      const textStyle = first?.classList.contains('ttg-cond')
+        ? nearbyTextStyle(first)
+        : (capturedTextStyle(first) ?? nearbyTextStyle(wrapper))
+      if (applyCapturedTextStyle(wrapper, textStyle)) repairedStyleContext = true
+    }
+    if (repairedStyleContext) persist()
 
     // History checkpoint at the START of a typing burst: beforeinput fires
     // BEFORE the DOM mutates, so the store still holds the pre-change state
@@ -762,7 +946,10 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       const cond = target?.closest?.('.ttg-cond') as HTMLElement | null
       if (cond) {
         const rule = decodeCond(cond.getAttribute('data-cond') ?? '')
-        if (rule) setEditingCond({ el: cond, rule })
+        if (rule) {
+          const textStyle = rule.textStyle ?? nearbyTextStyle(cond)
+          setEditingCond({ el: cond, rule: textStyle ? { ...rule, textStyle } : rule })
+        }
         return
       }
       const chip = target?.closest?.('.ttg-chip') as HTMLElement | null
@@ -770,7 +957,15 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         const tag = chip.dataset.field
         const bound = useWorkspace.getState().ruleBindings[tag]
         // A rule-bound tag re-opens its rule editor; the rest, the bind popover.
-        if (bound) setBindingRule({ tag, rule: bound.rule, perRow: bound.perRow, existing: true })
+        if (bound) {
+          const textStyle = bound.rule.textStyle ?? capturedTextStyle(chip)
+          setBindingRule({
+            tag,
+            rule: textStyle ? { ...bound.rule, textStyle } : bound.rule,
+            perRow: bound.perRow,
+            existing: true,
+          })
+        }
         else setBindTag({ tag, el: chip })
       }
     })
@@ -904,8 +1099,9 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
           }}
           onRule={(perRow) => {
             const tag = bindTag.tag
+            const textStyle = capturedTextStyle(bindTag.el)
             setBindTag(null)
-            setBindingRule({ tag, rule: freshRule(), perRow, existing: false })
+            setBindingRule({ tag, rule: freshRule(textStyle), perRow, existing: false })
           }}
           onRemove={() => {
             checkpointFlushed(`Campo «${bindTag.tag}» eliminado`)
@@ -932,6 +1128,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
             setBindingRule(null)
           }}
           onClose={() => setBindingRule(null)}
+          onRichSelection={handleRichSelection}
         />
       ) : null}
 
@@ -953,6 +1150,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
             setEditingCond(null)
           }}
           onClose={() => setEditingCond(null)}
+          onRichSelection={handleRichSelection}
         />
       ) : null}
       </div>
@@ -977,4 +1175,3 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     </div>
   )
 })
-

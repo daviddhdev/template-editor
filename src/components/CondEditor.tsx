@@ -1,7 +1,13 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { GitBranch, Plus, Trash2 } from 'lucide-react'
 import type { ConditionOperator, ConditionalRule } from '../types'
 import { uid } from '../lib/uid'
+import {
+  conditionalTextStyleReact,
+  normalizeRichText,
+  plainTextToRichHtml,
+  sanitizeRichText,
+} from '../lib/richText'
 import { Button, useDialogChrome } from './ui'
 
 const OPERATORS: { value: ConditionOperator; label: string }[] = [
@@ -12,6 +18,87 @@ const OPERATORS: { value: ConditionOperator; label: string }[] = [
 
 const selectCls =
   'rounded-lg border border-input-border bg-surface px-2 py-1.5 text-sm text-ink-secondary outline-none focus:border-primary'
+
+export interface RichTextSelection {
+  element: HTMLElement
+  range: Range
+  /** Pull the DOM produced by execCommand back into the local rule state. */
+  sync: () => void
+}
+
+function RichTextField({
+  text,
+  html,
+  textStyle,
+  label,
+  placeholder,
+  onChange,
+  onSelection,
+}: {
+  text: string
+  html?: string
+  textStyle: ConditionalRule['textStyle']
+  label: string
+  placeholder: string
+  onChange: (value: { text: string; html?: string }) => void
+  onSelection?: (selection: RichTextSelection | null) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  const sync = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    onChange(normalizeRichText(el.innerHTML))
+  }, [onChange])
+
+  const publishSelection = useCallback(() => {
+    const el = ref.current
+    const selection = el?.ownerDocument.defaultView?.getSelection()
+    if (!el || !selection?.rangeCount) return
+    const range = selection.getRangeAt(0)
+    if (!el.contains(range.commonAncestorContainer)) return
+    onSelection?.({ element: el, range: range.cloneRange(), sync })
+  }, [onSelection, sync])
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.innerHTML = html ? sanitizeRichText(html) : plainTextToRichHtml(text)
+    const doc = el.ownerDocument
+    doc.addEventListener('selectionchange', publishSelection)
+    return () => doc.removeEventListener('selectionchange', publishSelection)
+    // The field is intentionally initialised once. React state follows DOM
+    // input; rewriting innerHTML on each keystroke would destroy the caret.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <div
+      ref={ref}
+      role="textbox"
+      aria-label={label}
+      aria-multiline="true"
+      contentEditable
+      suppressContentEditableWarning
+      data-placeholder={placeholder}
+      onInput={() => {
+        sync()
+        publishSelection()
+      }}
+      onFocus={publishSelection}
+      onKeyUp={publishSelection}
+      onMouseUp={publishSelection}
+      onPaste={(event) => {
+        event.preventDefault()
+        const value = event.clipboardData.getData('text/plain')
+        event.currentTarget.ownerDocument.execCommand('insertText', false, value)
+        sync()
+      }}
+      style={conditionalTextStyleReact(textStyle) as CSSProperties}
+      className="ttg-rich-field mt-1.5 min-h-[4.25rem] w-full rounded-lg border border-input-border bg-surface px-2 py-1.5 text-sm outline-none empty:before:pointer-events-none empty:before:text-ink-faint empty:before:content-[attr(data-placeholder)] focus:border-primary [&_p]:m-0"
+    />
+  )
+}
 
 /**
  * Popover form for one conditional rule. Edits a local copy; "Guardar" hands
@@ -26,6 +113,7 @@ export function CondEditor({
   onSave,
   onDelete,
   onClose,
+  onRichSelection,
 }: {
   initial: ConditionalRule
   columns: string[]
@@ -34,10 +122,13 @@ export function CondEditor({
   onSave: (rule: ConditionalRule, perRow: boolean) => void
   onDelete: () => void
   onClose: () => void
+  onRichSelection?: (selection: RichTextSelection | null) => void
 }) {
   const [rule, setRule] = useState<ConditionalRule>(initial)
   const [repeatPerRow, setRepeatPerRow] = useState(perRow ?? false)
   const dialogRef = useDialogChrome(onClose)
+
+  useEffect(() => () => onRichSelection?.(null), [onRichSelection])
 
   const patchBranch = (id: string, patch: Partial<ConditionalRule['branches'][number]>) =>
     setRule((r) => ({
@@ -120,13 +211,14 @@ export function CondEditor({
                 </button>
               ) : null}
             </div>
-            <textarea
-              value={br.text}
-              onChange={(e) => patchBranch(br.id, { text: e.target.value })}
+            <RichTextField
+              text={br.text}
+              html={br.textHtml}
+              textStyle={rule.textStyle}
               placeholder="Mostrar este texto… (puede incluir campos como {{nombre}})"
-              aria-label="Texto a mostrar cuando se cumpla"
-              rows={2}
-              className="mt-1.5 w-full rounded-lg border border-input-border bg-surface px-2 py-1.5 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+              label="Texto a mostrar cuando se cumpla"
+              onSelection={onRichSelection}
+              onChange={({ text, html }) => patchBranch(br.id, { text, textHtml: html })}
             />
           </div>
         ))}
@@ -148,12 +240,16 @@ export function CondEditor({
 
         <label className="block text-xs text-ink-muted">
           Si no se cumple ninguna, mostrar (opcional):
-          <textarea
-            value={rule.defaultText ?? ''}
-            onChange={(e) => setRule((r) => ({ ...r, defaultText: e.target.value }))}
+          <RichTextField
+            text={rule.defaultText ?? ''}
+            html={rule.defaultTextHtml}
+            textStyle={rule.textStyle}
             placeholder="Dejar en blanco para no mostrar nada"
-            rows={2}
-            className="mt-1 w-full rounded-lg border border-input-border bg-surface px-2 py-1.5 text-sm outline-none placeholder:text-ink-faint focus:border-primary"
+            label="Texto a mostrar si no se cumple ninguna condición"
+            onSelection={onRichSelection}
+            onChange={({ text, html }) =>
+              setRule((r) => ({ ...r, defaultText: text, defaultTextHtml: html }))
+            }
           />
         </label>
 

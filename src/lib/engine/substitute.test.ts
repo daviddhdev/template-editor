@@ -34,6 +34,43 @@ describe('substituteTags with rule bindings', () => {
     expect(out).toBe('<p>&lt;b&gt;Ana&lt;/b&gt;</p>')
   })
 
+  it('keeps rich formatting and alignment for anchored repeated rules', () => {
+    const rich: ConditionalRule = {
+      ...rule,
+      defaultTextHtml:
+        '<p style="text-align:center"><span style="font-weight:bold">Línea de {{NOMBRE}}</span></p>',
+      textStyle: { fontFamily: 'Arial' },
+    }
+    const out = substituteTags('<td>{{S}}</td>', {
+      mapping: { NOMBRE: 'Nombre' },
+      onMissing: 'empty',
+      ruleBindings: { S: { rule: rich, perRow: true } },
+      row: rows[0],
+      groupRows: rows,
+    })
+    expect(out).toBe(
+      '<td><span style="font-family:Arial"><span style="display:block;text-align:center">' +
+        '<span style="font-weight:bold">Línea de Ana</span></span></span><br><br>' +
+        '<span style="font-family:Arial"><span style="display:block;text-align:center">' +
+        '<span style="font-weight:bold">Línea de Luis</span></span></span></td>',
+    )
+  })
+
+  it('escapes column values substituted inside rich rule HTML', () => {
+    const rich = {
+      ...rule,
+      defaultTextHtml: '<p><i>{{NOMBRE}}</i></p>',
+    }
+    const out = substituteTags('<p>{{S}}</p>', {
+      mapping: { NOMBRE: 'Nombre' },
+      onMissing: 'empty',
+      ruleBindings: { S: { rule: rich, perRow: false } },
+      row: { Nombre: '<img src=x onerror=alert(1)>' },
+    })
+    expect(out).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(out).not.toContain('<img')
+  })
+
   it('column tags keep working alongside', () => {
     const out = substituteTags('<p>{{NOMBRE}}</p>', { ...base, row: rows[1], groupRows: rows })
     expect(out).toBe('<p>Luis</p>')

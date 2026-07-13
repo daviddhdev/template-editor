@@ -37,7 +37,7 @@ const FORMAT_BUTTONS: ({ cmd: string; label: string; Icon: typeof Bold } | null)
   { cmd: 'justifyFull', label: 'Justificar', Icon: AlignJustify },
 ]
 
-/** Bold/italic/underline + alignment over the selection in the editor iframe,
+/** Bold/italic/underline + alignment over the latest editor/dialog selection,
  * plus undo/redo and the change-history panel. */
 export function FormatToolbar({
   fmt,
@@ -126,7 +126,7 @@ export function FormatToolbar({
         ),
       )}
       <span className="ml-2 text-xs text-ink-faint">
-        Selecciona texto en el documento y aplica formato
+        Selecciona texto en el documento o en una regla y aplica formato
       </span>
 
       {historyOpen ? <HistoryPanel onClose={() => setHistoryOpen(false)} /> : null}

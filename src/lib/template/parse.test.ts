@@ -36,4 +36,20 @@ describe('resolveConditional output styling', () => {
     const rule = { id: 'r', label: 'x', branches: [], defaultText: '<b>no html</b>' }
     expect(resolveConditional(rule, {}, sub)).toBe('<p>&lt;b&gt;no html&lt;/b&gt;</p>')
   })
+
+  it('renders sanitised rich branch content in the captured document font', () => {
+    const rule = {
+      id: 'r',
+      label: 'x',
+      branches: [],
+      defaultText: 'Hola {{NOMBRE}}',
+      defaultTextHtml:
+        '<p style="text-align:right"><span style="font-style:italic">Hola {{NOMBRE}}</span></p>',
+      textStyle: { fontFamily: 'Roboto', fontSize: '10pt' },
+    }
+    expect(resolveConditional(rule, { Nombre: 'Ana' }, sub)).toBe(
+      '<div style="font-family:Roboto;font-size:10pt"><p style="text-align:right">' +
+        '<span style="font-style:italic">Hola Ana</span></p></div>',
+    )
+  })
 })

@@ -59,7 +59,7 @@ export function ErrorNote({ title, hint }: { title: string; hint?: string }) {
 }
 
 const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])'
 
 /**
  * Shared dialog behaviour: close on Escape, keep Tab cycling INSIDE the

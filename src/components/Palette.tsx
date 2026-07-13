@@ -6,20 +6,8 @@ import { sampleRowsForMapping } from '../lib/ai/mappingPrompt'
 import { suggestMappingFn } from '../server/aiMapping'
 import { unmappedTags } from '../lib/plan'
 import { buildTemplateCached } from '../lib/template/parse'
-import type { ConditionalRule } from '../types'
-import { uid } from '../lib/uid'
-import { CondEditor } from './CondEditor'
 import { COND_MIME, DRAG_MIME } from './DocCanvas'
 import type { DocCanvasHandle } from './DocCanvas'
-
-function freshRule(columns: string[]): ConditionalRule {
-  return {
-    id: uid(),
-    label: 'Texto condicional',
-    branches: [{ id: uid(), column: columns[0] ?? '', operator: 'equals', value: '', text: '' }],
-    defaultText: '',
-  }
-}
 
 /**
  * Scratch-style palette: data columns you drag (or click) into the document,
@@ -39,13 +27,10 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
     ruleBindings,
     mergeMapping,
     assign,
-    bindRule,
     group,
     notify,
   } = useWorkspace()
   const [customName, setCustomName] = useState('')
-  /** Anchored rule being created for an unbound tag from this list. */
-  const [ruleFor, setRuleFor] = useState<string | null>(null)
   const [suggesting, setSuggesting] = useState(false)
 
   const columns = data?.columns ?? []
@@ -216,7 +201,7 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
                 </select>
                 {docTags.has(tag) ? (
                   <button
-                    onClick={() => setRuleFor(tag)}
+                    onClick={() => canvas.current?.openRuleEditor(tag)}
                     title="Rellenar con un texto condicional o una sección repetible"
                     aria-label={`Vincular ${tag} a una regla`}
                     className="rounded-md p-1 text-accent-orange outline-none hover:bg-accent-orange/10 focus-visible:ring-2 focus-visible:ring-primary"
@@ -230,22 +215,6 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
         </section>
       ) : null}
 
-      {ruleFor ? (
-        <div className="fixed inset-0 z-50 bg-black/30">
-          <CondEditor
-            key={`palette-${ruleFor}`}
-            initial={freshRule(columns)}
-            columns={columns}
-            perRow={false}
-            onSave={(rule, perRow) => {
-              bindRule(ruleFor, rule, perRow)
-              setRuleFor(null)
-            }}
-            onDelete={() => setRuleFor(null)}
-            onClose={() => setRuleFor(null)}
-          />
-        </div>
-      ) : null}
     </aside>
   )
 }

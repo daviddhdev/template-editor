@@ -36,6 +36,8 @@ const FALLBACK_EXPLANATION: Record<NativeFallbackReason, string> = {
     'Hay cambios de estructura, formato o texto repetido que no se pueden trasladar con seguridad al original, así que se usará la conversión HTML (el aspecto puede variar ligeramente).',
   css_changed:
     'Has cambiado los márgenes en la app, así que se usará la conversión HTML (la generación desde el original los ignoraría).',
+  formatted_rule:
+    'Has aplicado formato dentro de un texto condicional o una sección repetible vinculada. La sustitución nativa no puede conservar estilos parciales, así que se usará la conversión HTML.',
 }
 
 type DocStatus = 'pending' | 'running' | 'done' | 'error'

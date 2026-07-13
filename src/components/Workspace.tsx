@@ -167,8 +167,10 @@ export function Workspace() {
   const needsNativeDocument = generateOpen || view === 'preview'
   const nativeRoute = useMemo(
     () =>
-      needsNativeDocument ? decideNativeRoute({ sourceFile, editorHtml, editorCss }) : null,
-    [needsNativeDocument, sourceFile, editorHtml, editorCss],
+      needsNativeDocument
+        ? decideNativeRoute({ sourceFile, editorHtml, editorCss, ruleBindings })
+        : null,
+    [needsNativeDocument, sourceFile, editorHtml, editorCss, ruleBindings],
   )
   const native = useMemo(
     () =>

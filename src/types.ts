@@ -114,6 +114,14 @@ export type RuleBindings = Record<string, RuleBinding>
 
 export type ConditionOperator = 'equals' | 'not_equals' | 'contains'
 
+/** Font context inherited from the document around a conditional/repeat. */
+export interface ConditionalTextStyle {
+  fontFamily?: string
+  fontSize?: string
+  lineHeight?: string
+  color?: string
+}
+
 /** One branch of a conditional: "if [column] [op] [value] -> show [text]". */
 export interface ConditionBranch {
   id: string
@@ -122,6 +130,8 @@ export interface ConditionBranch {
   value: string
   /** Text to show when this branch matches. May itself contain `{{tags}}`. */
   text: string
+  /** Sanitised rich fragment. Absent when the branch is plain text. */
+  textHtml?: string
 }
 
 /**
@@ -138,6 +148,10 @@ export interface ConditionalRule {
   label: string
   branches: ConditionBranch[]
   defaultText?: string
+  /** Sanitised rich fragment for defaultText; absent when it is plain. */
+  defaultTextHtml?: string
+  /** Minimal surrounding font context, captured in the editor. */
+  textStyle?: ConditionalTextStyle
 }
 
 /**

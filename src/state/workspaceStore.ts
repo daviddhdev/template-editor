@@ -422,8 +422,8 @@ const hydratedOnce = new Promise<void>((resolve) => {
 })
 
 /** Resolves once the first rehydrateStores() finishes — screens that read
- * the restored state (Home's legacy-recipes migration) await this instead of
- * hydrating themselves (only the authed layout knows the session user). */
+ * restored state await this instead of hydrating themselves (only the authed
+ * layout knows the session user). */
 export function storesHydrated(): Promise<void> {
   return hydratedOnce
 }
@@ -466,9 +466,7 @@ export async function rehydrateStores(user: { id: string; email: string }): Prom
       history: { past: [], future: [] },
     }))
   }
-  const { useRecipes } = await import('./recipesStore')
   await Promise.resolve(useWorkspace.persist.rehydrate())
-  await Promise.resolve(useRecipes.persist.rehydrate())
   const s = useWorkspace.getState()
   if (s.editorHtml.trim()) {
     useWorkspace.setState({

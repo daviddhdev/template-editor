@@ -36,9 +36,10 @@ conexión Google de cada persona (refresh token); `sessions` las sesiones de la
 app (cookie `ttg_session` httpOnly, 30 días deslizantes, solo el hash SHA-256
 del token en la DB).
 
-Las plantillas que existieran en localStorage (`ttg-recipes`, versión anterior)
-se **migran automáticamente** a la DB la primera vez que se abre la home con la
-DB disponible, y se vacía el almacén local.
+La biblioteca de plantillas vive exclusivamente en Postgres. El antiguo store
+`ttg-recipes` y su migración desde localStorage se retiraron una vez terminada
+la ventana de compatibilidad; una clave antigua que quede en un navegador se
+ignora y no se borra automáticamente.
 
 ### Entrada con Google = login de la app (paginación exacta + documentos privados)
 
@@ -149,7 +150,12 @@ conectada no está disponible (el motor local solo produce PDF).
   (`si [columna] [es/no es/contiene] [valor] → mostrar…`), texto por defecto,
   Guardar / Eliminar. El JSON de la regla viaja URI-encoded en `data-cond` y el
   motor la resuelve **in situ**; dentro de una sección repetible se evalúa
-  **una vez por fila** automáticamente.
+  **una vez por fila** automáticamente. Los textos de cada rama y el texto por
+  defecto son `contenteditable`: guardan siempre su versión plana y solo añaden
+  HTML saneado cuando hay negrita/cursiva/subrayado/alineación. Esto también se
+  aplica a reglas vinculadas a un `{{campo}}`; si tienen formato explícito se
+  usa el fallback HTML con aviso porque `replaceAllText` no conserva rangos de
+  estilo.
 - **Repetir por fila**: con el cursor en un bloque alterna su
   `data-ttg-repeat`; con una **selección que abarca varios bloques** los
   envuelve en una sección repetible única (`<div data-ttg-repeat>`); volver a
@@ -158,13 +164,17 @@ conectada no está disponible (el motor local solo produce PDF).
   cada documento lleva una única fila y no habría nada que repetir): al marcarla
   en modo por-fila un diálogo propone cambiar de modo, y si quedan secciones
   marcadas en por-fila la barra de estado lo avisa. No pide columna: la columna
-  que define el grupo es la de la agrupación (barra superior).
+  que define el grupo es la de la agrupación (barra superior). Al crear o
+  cargar el wrapper se captura del contenido vecino la familia, tamaño, altura
+  de línea y color para que los párrafos nuevos no caigan a la fuente del
+  navegador aunque la plantilla defina la tipografía solo en spans/clases.
 - **Barra de formato** sobre el lienzo: negrita, cursiva, subrayado y
-  alineación (izquierda/centro/derecha/justificado) sobre la selección del
-  iframe. Implementada con `document.execCommand` + `styleWithCSS` (emite
-  estilos inline como el propio export de Google); el botón hace
-  `preventDefault` en mousedown para no matar la selección del iframe, y el
-  estado activo se refresca con `queryCommandState` en `selectionchange`.
+  alineación (izquierda/centro/derecha/justificado) sobre la última selección
+  activa, tanto en el iframe como dentro del diálogo de una regla.
+  Implementada con `document.execCommand` + `styleWithCSS` (emite estilos
+  inline como el propio export de Google); el botón hace `preventDefault` en
+  mousedown para conservar la selección, y el estado activo se refresca con
+  `queryCommandState` en `selectionchange`.
   **Centrar** además neutraliza `text-indent` y márgenes laterales de los
   bloques seleccionados (los párrafos del export de Google llevan sangría de
   primera línea y márgenes por clase; sin esto el texto queda anclado a la
@@ -276,14 +286,11 @@ src/
                            'ttg-workspace' una vez y borra espejos de OTROS
                            usuarios (privacidad en navegador compartido);
                            flush en pagehide y al cerrar sesión
-  state/recipesStore.ts    LEGACY: solo existe para migrar las plantillas del
-                           localStorage antiguo a la DB (Home lo lee y lo vacía)
   components/
     Home.tsx               Pantalla de inicio (ruta /) estilo Drive: "continuar
                            donde lo dejaste" (workspace autosaved), grid de
                            plantillas con miniatura + menú (abrir/duplicar/
-                           renombrar/eliminar), filtro por nombre, migración
-                           automática desde localStorage
+                           renombrar/eliminar) y filtro por nombre
     SaveRecipeDialog.tsx   Diálogo "Guardar plantilla" del editor (nombre ->
                            saveRecipeFn, con miniatura)
     Workspace.tsx          El editor (ruta /editor). Orquestador: deriva la plantilla del HTML del editor

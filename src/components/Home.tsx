@@ -13,14 +13,12 @@ import {
   Trash2,
 } from 'lucide-react'
 import { storesHydrated, useWorkspace } from '../state/workspaceStore'
-import { useRecipes } from '../state/recipesStore'
 import {
   deleteRecipeFn,
   duplicateRecipeFn,
   getRecipeFn,
   listRecipesFn,
   renameRecipeFn,
-  saveRecipeFn,
   type RecipeSummary,
 } from '../server/recipesDb'
 import { formatIssuesNotice, loadDataIntoWorkspace, missingColumnsNotice } from '../lib/loadData'
@@ -86,30 +84,12 @@ export function HomeScreen() {
   }, [])
   useEffect(refreshGoogle, [refreshGoogle])
 
-  // Wait for the authed layout's hydration, migrate any localStorage-era
-  // templates into the database (one-time), then list the library.
+  // Wait for the authed layout's workspace hydration before listing the
+  // database-backed template library.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       await storesHydrated()
-      const legacy = useRecipes.getState().recipes
-      if (legacy.length > 0) {
-        let migrated = 0
-        for (const r of legacy) {
-          const { id: _id, savedAt: _at, ...input } = r
-          const res = await saveRecipeFn({ data: { recipe: input } }).catch(() => null)
-          if (!res?.ok) break // DB down: the REST stays in localStorage, retried next visit
-          // Drop each recipe as soon as ITS save succeeds: a failure later in
-          // the loop must not re-insert the already-migrated ones next visit.
-          useRecipes.getState().remove(r.id)
-          migrated++
-        }
-        if (migrated > 0) {
-          notify(
-            `${migrated} ${migrated === 1 ? 'plantilla migrada' : 'plantillas migradas'} de este navegador a la base de datos.`,
-          )
-        }
-      }
       if (!cancelled) await refresh()
     })()
     return () => {
