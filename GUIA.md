@@ -139,7 +139,8 @@ conectada no está disponible (el motor local solo produce PDF).
   chips; los que no casan con ninguna columna se ven en ámbar y un clic abre el
   popover de vinculación. Al pasar el ratón por un chip, el tooltip dice con qué
   columna (o regla) se rellena; el popover marca la columna vinculada, indica si
-  el vínculo es por coincidencia de nombre y permite «Desvincular». *Sugerir vínculos automáticamente* llama a la IA
+  el vínculo es por coincidencia de nombre y permite «Desvincular».
+  *Sugerir vínculos automáticamente* llama a la IA
   (`suggestMappingFn`, requiere `OPENAI_API_KEY`) y cae a la heurística
   `suggestMapping()` si no hay clave o falla.
 - **Condiciones inline (estilo Scratch)**: la condición ES un bloque del
@@ -168,9 +169,13 @@ conectada no está disponible (el motor local solo produce PDF).
   cargar el wrapper se captura del contenido vecino la familia, tamaño, altura
   de línea y color para que los párrafos nuevos no caigan a la fuente del
   navegador aunque la plantilla defina la tipografía solo en spans/clases.
-- **Barra de formato** sobre el lienzo: negrita, cursiva, subrayado y
-  alineación (izquierda/centro/derecha/justificado) sobre la última selección
+- **Barra de formato** sobre el lienzo: tamaño en puntos, color, negrita,
+  cursiva, subrayado y alineación (izquierda/centro/derecha/justificado) sobre la última selección
   activa, tanto en el iframe como dentro del diálogo de una regla.
+  El tamaño admite valores comunes o cualquier medida entre 1 y 400 pt; el
+  selector de color muestra primero los colores de texto más usados en la
+  plantilla y también admite un color personalizado/hexadecimal. Estos dos
+  formatos se aplican a cualquier texto seleccionado, incluidas variables.
   Implementada con `document.execCommand` + `styleWithCSS` (emite estilos
   inline como el propio export de Google); el botón hace `preventDefault` en
   mousedown para conservar la selección, y el estado activo se refresca con
@@ -364,12 +369,17 @@ expandidos) se sube a Drive **convertido a un Google Doc temporal**, se exporta
 como PDF (`files/{id}/export?mimeType=application/pdf`) y se borra el temporal.
 Quien pagina es el propio Kix — el mismo motor que maquetó el original — así que
 los saltos de página caen solos donde deben, incluso cuando los datos sustituidos
-alargan o acortan párrafos. Nota de diseño: la idea inicial de `documents.batchUpdate`
-+ `replaceAllText` sobre una **copia** del Doc no sirve con el lienzo Scratch — los
+alargan o acortan párrafos. Nota de diseño: `documents.batchUpdate`
++ `replaceAllText` sobre una **copia** del Doc no sirve para elementos nuevos del lienzo Scratch — los
 campos, condiciones y repetibles viven en el HTML editado **en la app**, no en el
 Doc original, así que en la copia no habría nada que reemplazar. Subir el HTML
 resuelto (que es el propio export HTML de Google, editado) conserva todas las
 funciones del editor y deja la maquetación en manos de Google.
+Cuando el marcador ya existía en el original y el resto de la estructura sigue
+siendo compatible, la ruta nativa sí materializa el archivo original: aplica los
+cambios de tamaño/color por aparición con `updateTextStyle` y después sustituye
+los campos con `replaceAllText`. Si una aparición no se puede localizar sin
+ambigüedad, ese documento se regenera por la ruta HTML y se marca «vía HTML».
 
 **Encabezados/pies repetidos (decisión de diseño):** cuando el Doc origen es la copia
 de un boletín, sus líneas de encabezado/pie ("Boletín Oficial…", URL) vienen **en

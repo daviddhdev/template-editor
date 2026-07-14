@@ -25,11 +25,20 @@ export interface NativeEdit {
   replace: string
 }
 
+/** Style override for one zero-based occurrence of a tag in source order. */
+export interface NativeFieldStyle {
+  tag: string
+  occurrence: number
+  fontSizePt?: number
+  colorHex?: string
+}
+
 /** One output document: display name + the tag substitutions for its group. */
 export interface NativeJob {
   name: string
   /** Safe in-app text edits, applied before resolving template tags. */
   edits?: NativeEdit[]
+  styles?: NativeFieldStyle[]
   replacements: NativeReplacement[]
 }
 
@@ -99,7 +108,24 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
           return { find, replace: requireString(edit.replace, 'replace') }
         },
       )
-      return { name: requireString(job.name, `jobs[${n}].name`), edits, replacements }
+      const styles: NativeFieldStyle[] = (job.styles === undefined ? [] : requireArray(job.styles, `jobs[${n}].styles`)).map(
+        (s, k) => {
+          const style = requireRecord(s, `jobs[${n}].styles[${k}]`)
+          const occurrence = Number(style.occurrence)
+          const fontSizePt = style.fontSizePt === undefined ? undefined : Number(style.fontSizePt)
+          const colorHex = style.colorHex === undefined ? undefined : requireString(style.colorHex, 'colorHex').toUpperCase()
+          if (!Number.isInteger(occurrence) || occurrence < 0) throw new ValidationError('Petición inválida: aparición de campo no válida.')
+          if (fontSizePt !== undefined && (!Number.isFinite(fontSizePt) || fontSizePt < 1 || fontSizePt > 400)) {
+            throw new ValidationError('Petición inválida: tamaño de campo fuera de rango.')
+          }
+          if (colorHex !== undefined && !/^#[\dA-F]{6}$/.test(colorHex)) {
+            throw new ValidationError('Petición inválida: color de campo no válido.')
+          }
+          if (fontSizePt === undefined && colorHex === undefined) throw new ValidationError('Petición inválida: estilo de campo vacío.')
+          return { tag: requireString(style.tag, 'tag'), occurrence, ...(fontSizePt === undefined ? {} : { fontSizePt }), ...(colorHex === undefined ? {} : { colorHex }) }
+        },
+      )
+      return { name: requireString(job.name, `jobs[${n}].name`), edits, styles, replacements }
     })
     return {
       sourceFileId: requireString(i.sourceFileId, 'sourceFileId'),
@@ -147,6 +173,9 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
         const name = safeName(job.name)
         const copyId = await g.withRetry(() => g.uploadAsGoogleDoc(token, name, sourceBytes, uploadMime))
         try {
+          if (job.styles?.length) {
+            await g.withRetry(() => g.applyFieldStylesInDoc(token, copyId, job.styles!, job.replacements))
+          }
           if (job.edits?.length) {
             const changed = await g.withRetry(() => g.replaceAllTextInDoc(token, copyId, job.edits!))
             const ambiguous = changed.find((result) => result.occurrences !== 1)
@@ -191,7 +220,12 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
       }
     } catch (err) {
       if (err instanceof g.GoogleError) {
-        return { ok: false, error: err.message, hint: err.hint }
+        return {
+          ok: false,
+          error: err.message,
+          hint: err.hint,
+          ...(err.code === 'NATIVE_STYLE_MISMATCH' ? { fallbackHtml: true } : {}),
+        }
       }
       return {
         ok: false,

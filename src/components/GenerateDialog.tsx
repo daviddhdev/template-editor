@@ -170,7 +170,7 @@ export function GenerateDialog({
     unit: Unit,
     asHtml: boolean,
   ): Promise<
-    { ok: true; files: PdfFile[]; unmatched?: string[] } | { ok: false; error: string; hint?: string }
+    { ok: true; files: PdfFile[]; unmatched?: string[] } | { ok: false; error: string; hint?: string; fallbackHtml?: boolean }
   > {
     const formats: GoogleFormat[] = withDocx ? ['pdf', 'docx'] : ['pdf']
     try {
@@ -269,13 +269,18 @@ export function GenerateDialog({
   async function runOne(i: number, asHtml: boolean) {
     patch(i, { status: 'running', error: undefined })
     const t0 = Date.now()
-    const res = await callOne(units[i], asHtml)
+    let res = await callOne(units[i], asHtml)
+    let automaticHtmlFallback = false
+    if (!asHtml && !res.ok && res.fallbackHtml && units[i].pdfJob) {
+      res = await callOne(units[i], true)
+      automaticHtmlFallback = res.ok
+    }
     durations.current.push(Date.now() - t0)
     if (res.ok) {
       if (res.unmatched?.length) {
         setUnmatched((prev) => [...new Set([...prev, ...res.unmatched!])].sort())
       }
-      patch(i, { status: 'done', files: res.files, viaHtml: asHtml || !(viaNative && units[i].nativeJob) })
+      patch(i, { status: 'done', files: res.files, viaHtml: asHtml || automaticHtmlFallback || !(viaNative && units[i].nativeJob) })
       if (uploadToDrive && canWrite) await uploadDoc(i, res.files)
     } else {
       patch(i, { status: 'error', error: { error: res.error, hint: res.hint } })

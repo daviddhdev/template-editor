@@ -20,12 +20,16 @@ import {
 } from '../lib/editorHtml'
 import { decodeCond } from '../lib/cond'
 import { effectiveMapping } from '../lib/plan'
+import {
+  colorToHex,
+  documentTextColors,
+} from '../lib/fieldAppearance'
 import { sanitizeConditionalTextStyle } from '../lib/richText'
 import { uid } from '../lib/uid'
 import type { ConditionalRule, ConditionalTextStyle } from '../types'
 import { BindFieldPopover } from './BindFieldPopover'
 import { CondEditor, type RichTextSelection } from './CondEditor'
-import { FORMAT_LABEL, FormatToolbar } from './FormatToolbar'
+import { FORMAT_LABEL, FormatToolbar, type ToolbarTextStyle } from './FormatToolbar'
 import { MarginRuler } from './MarginRuler'
 import { Button, ConfirmDialog } from './ui'
 
@@ -118,17 +122,21 @@ function chipBesideCaret(node: Node, offset: number, dir: 'back' | 'fwd'): HTMLE
     probe = dir === 'back' ? probe.previousSibling : probe.nextSibling
   }
   const el = probe && probe.nodeType === Node.ELEMENT_NODE ? (probe as HTMLElement) : null
-  return el && el.classList.contains('ttg-chip') ? el : null
+  if (!el) return null
+  if (el.classList.contains('ttg-chip')) return el
+  return el.hasAttribute('data-ttg-field-style') ? el.querySelector<HTMLElement>(':scope > .ttg-chip') : null
 }
 
 /** Remove a chip together with the caret anchor that follows it. */
 function removeChip(chip: HTMLElement): void {
-  const next = chip.nextSibling
+  const styleWrapper = chip.closest<HTMLElement>('[data-ttg-field-style]')
+  const next = styleWrapper?.nextSibling ?? chip.nextSibling
   if (next && isAnchorText(next)) next.remove()
   else if (next && next.nodeType === Node.TEXT_NODE) {
     ;(next as Text).data = (next as Text).data.replace(new RegExp(`^${CARET_ANCHOR}+`), '')
   }
   chip.remove()
+  if (styleWrapper && !styleWrapper.textContent) styleWrapper.remove()
 }
 
 /**
@@ -179,6 +187,43 @@ function capturedTextStyle(el: HTMLElement | null): ConditionalTextStyle | undef
     lineHeight: computed.lineHeight,
     color: computed.color,
   })
+}
+
+function toolbarStyleAt(doc: Document, range: Range | null): ToolbarTextStyle {
+  let node: Node | null = range?.startContainer ?? doc.body
+  if (node.nodeType === Node.ELEMENT_NODE && range && (node as Element).childNodes[range.startOffset]) {
+    node = (node as Element).childNodes[range.startOffset]
+  }
+  const element = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement
+  const computed = doc.defaultView?.getComputedStyle(element ?? doc.body)
+  const px = Number.parseFloat(computed?.fontSize ?? '')
+  return {
+    fontSizePt: Number.isFinite(px) ? Math.round(px * 0.75 * 100) / 100 : 11,
+    colorHex: colorToHex(computed?.color) ?? '#000000',
+  }
+}
+
+export function applyEditorFormat(
+  doc: Document,
+  command: string,
+  value: string | undefined,
+  range: Range | null,
+  root: HTMLElement,
+): void {
+  if (command !== 'fontSizePt') {
+    doc.execCommand(command, false, value)
+    return
+  }
+  doc.execCommand('fontSize', false, '7')
+  if (!range || !value) return
+  for (const el of root.querySelectorAll<HTMLElement>('span[style],font[style],font[size="7"]')) {
+    if (!range.intersectsNode(el)) continue
+    const legacy = el.getAttribute('size') === '7'
+    const css = el.style.fontSize.toLowerCase()
+    if (!legacy && css !== 'xxx-large' && css !== '-webkit-xxx-large') continue
+    el.removeAttribute('size')
+    el.style.fontSize = `${value}pt`
+  }
 }
 
 function applyCapturedTextStyle(
@@ -316,6 +361,11 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
   const [askGroupMode, setAskGroupMode] = useState(false)
   /** Active inline formats at the caret, for toolbar button highlighting. */
   const [fmt, setFmt] = useState<Record<string, boolean>>({})
+  const [toolbarTextStyle, setToolbarTextStyle] = useState<ToolbarTextStyle>({
+    fontSizePt: 11,
+    colorHex: '#000000',
+  })
+  const [templateColors, setTemplateColors] = useState<string[]>(['#000000'])
 
   const editorDoc = () => iframeRef.current?.contentDocument ?? null
   const editorWin = () => iframeRef.current?.contentWindow ?? null
@@ -538,6 +588,13 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       }
     }
     setFmt(states)
+    const selection = doc.defaultView?.getSelection()
+    const range = rich?.element.isConnected
+      ? rich.range
+      : selection?.rangeCount
+        ? selection.getRangeAt(0)
+        : savedRange.current
+    setToolbarTextStyle(toolbarStyleAt(doc, range ?? null))
   }, [])
 
   const handleRichSelection = useCallback(
@@ -555,7 +612,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
    * Google's own export instead of <b>/<font> tags.
    */
   const execFormat = useCallback(
-    (command: string) => {
+    (command: string, value?: string) => {
       const rich = richFormatTarget.current
       if (rich?.element.isConnected) {
         const doc = rich.element.ownerDocument
@@ -570,7 +627,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         } catch {
           /* best effort, matching the iframe editor */
         }
-        doc.execCommand(command)
+        applyEditorFormat(doc, command, value, rich.range, rich.element)
         if (sel.rangeCount) rich.range = sel.getRangeAt(0).cloneRange()
         rich.sync()
         refreshFmt()
@@ -610,7 +667,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         }
       }
 
-      doc.execCommand(command)
+      applyEditorFormat(doc, command, value, range, doc.body)
 
       // Re-lock every chip (also those execCommand may have split/cloned).
       for (const chip of doc.body.querySelectorAll<HTMLElement>('.ttg-chip')) {
@@ -636,6 +693,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
 
       if (sel && sel.rangeCount) savedRange.current = sel.getRangeAt(0).cloneRange()
       persist()
+      setTemplateColors(documentTextColors(doc))
       refreshFmt()
     },
     [checkpointFlushed, persist, refreshFmt],
@@ -861,6 +919,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     doc.write(buildEditorDocument(editorCss, editorBodyClass, decorateFields(editorHtml || '')))
     doc.close()
     const body = doc.body
+    setTemplateColors(documentTextColors(doc))
 
     // Inline styles (like Google's export) instead of <b>/<font> wrappers.
     try {
@@ -1034,7 +1093,14 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
 
   return (
     <div className={`flex flex-col gap-1.5 ${className === 'hidden' ? 'hidden' : className}`}>
-      <FormatToolbar fmt={fmt} onCommand={execFormat} />
+      <FormatToolbar
+        fmt={fmt}
+        textStyle={toolbarTextStyle}
+        templateColors={templateColors}
+        onCommand={execFormat}
+        onFontSize={(sizePt) => execFormat('fontSizePt', String(sizePt))}
+        onColor={(colorHex) => execFormat('foreColor', colorHex)}
+      />
       {editorHtml.trim() ? (
         <MarginRuler
           iframeRef={iframeRef}

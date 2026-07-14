@@ -1,21 +1,33 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   AlignCenter,
   AlignJustify,
   AlignLeft,
   AlignRight,
   Bold,
+  Check,
   History,
   Italic,
+  Paintbrush,
   Redo2,
   Underline,
   Undo2,
 } from 'lucide-react'
 import { useWorkspace } from '../state/workspaceStore'
+import { colorToHex, validFontSizePt } from '../lib/fieldAppearance'
 import { useDialogChrome } from './ui'
+
+const COMMON_FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72]
+
+export interface ToolbarTextStyle {
+  fontSizePt: number
+  colorHex: string
+}
 
 /** Friendly history labels for the formatting commands. */
 export const FORMAT_LABEL: Record<string, string> = {
+  fontSizePt: 'Tamaño de fuente',
+  foreColor: 'Color del texto',
   bold: 'Negrita',
   italic: 'Cursiva',
   underline: 'Subrayado',
@@ -41,13 +53,52 @@ const FORMAT_BUTTONS: ({ cmd: string; label: string; Icon: typeof Bold } | null)
  * plus undo/redo and the change-history panel. */
 export function FormatToolbar({
   fmt,
+  textStyle,
+  templateColors,
   onCommand,
+  onFontSize,
+  onColor,
 }: {
   fmt: Record<string, boolean>
+  textStyle: ToolbarTextStyle
+  templateColors: string[]
   onCommand: (cmd: string) => void
+  onFontSize: (sizePt: number) => void
+  onColor: (colorHex: string) => void
 }) {
   const { history, undo, redo, notify } = useWorkspace()
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [colorOpen, setColorOpen] = useState(false)
+  const [showAllColors, setShowAllColors] = useState(false)
+  const [sizeInput, setSizeInput] = useState(String(textStyle.fontSizePt))
+  const [hexInput, setHexInput] = useState(textStyle.colorHex)
+
+  useEffect(() => {
+    setSizeInput(String(textStyle.fontSizePt))
+    setHexInput(textStyle.colorHex)
+  }, [textStyle])
+
+  const validateSize = () => {
+    const size = Number(sizeInput)
+    if (!validFontSizePt(size)) setSizeInput(String(textStyle.fontSizePt))
+  }
+  const changeSize = (raw: string) => {
+    setSizeInput(raw)
+    const size = Number(raw)
+    if (raw.trim() && validFontSizePt(size)) onFontSize(size)
+  }
+  const commitColor = (raw: string, close = false) => {
+    const color = colorToHex(raw)
+    if (!color) {
+      setHexInput(textStyle.colorHex)
+      return
+    }
+    setHexInput(color)
+    onColor(color)
+    if (close) setColorOpen(false)
+  }
+  const colors = [textStyle.colorHex, ...templateColors.filter((c) => c !== textStyle.colorHex)]
+  const visibleColors = showAllColors ? colors : colors.slice(0, 12)
 
   const doUndo = () => {
     const label = undo()
@@ -105,6 +156,45 @@ export function FormatToolbar({
       </button>
       <span className="mx-1 h-4 w-px bg-hairline" />
 
+      <label className="flex h-8 items-center gap-1 rounded-md border border-input-border bg-surface px-1.5 text-xs text-ink-muted">
+        <input
+          type="number"
+          min={1}
+          max={400}
+          step={0.5}
+          list="ttg-toolbar-font-sizes"
+          value={sizeInput}
+          onChange={(e) => changeSize(e.target.value)}
+          onBlur={validateSize}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              validateSize()
+            }
+          }}
+          aria-label="Tamaño de fuente en puntos"
+          title="Tamaño de fuente"
+          className="w-10 bg-transparent text-right text-sm text-ink outline-none"
+        />
+        <span>pt</span>
+        <datalist id="ttg-toolbar-font-sizes">
+          {COMMON_FONT_SIZES.map((size) => <option key={size} value={size} />)}
+        </datalist>
+      </label>
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setColorOpen((v) => !v)}
+        title="Color del texto"
+        aria-label="Color del texto"
+        aria-expanded={colorOpen}
+        className="relative flex h-8 items-center gap-1 rounded-md px-1.5 text-ink-secondary outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <Paintbrush className="h-4 w-4" />
+        <span className="h-1.5 w-5 rounded-full border border-black/10" style={{ backgroundColor: textStyle.colorHex }} />
+      </button>
+      <span className="mx-1 h-4 w-px bg-hairline" />
+
       {FORMAT_BUTTONS.map((b, i) =>
         b ? (
           <button
@@ -130,6 +220,69 @@ export function FormatToolbar({
       </span>
 
       {historyOpen ? <HistoryPanel onClose={() => setHistoryOpen(false)} /> : null}
+      {colorOpen ? (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setColorOpen(false)} />
+          <div
+            role="dialog"
+            aria-label="Elegir color del texto"
+            className="absolute left-24 top-full z-40 mt-2 w-72 rounded-xl border border-hairline bg-surface p-3 shadow-e2"
+          >
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              Colores de la plantilla
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {visibleColors.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => commitColor(color, true)}
+                  title={color}
+                  aria-label={`Color ${color}`}
+                  aria-pressed={color === textStyle.colorHex}
+                  className={`flex h-7 w-7 items-center justify-center rounded-full border outline-none focus-visible:ring-2 focus-visible:ring-primary ${color === textStyle.colorHex ? 'border-primary ring-2 ring-primary/20' : 'border-black/15'}`}
+                  style={{ backgroundColor: color }}
+                >
+                  {color === textStyle.colorHex ? <Check className={`h-3.5 w-3.5 ${color === '#FFFFFF' ? 'text-black' : 'text-white'}`} /> : null}
+                </button>
+              ))}
+            </div>
+            {colors.length > 12 ? (
+              <button
+                type="button"
+                onClick={() => setShowAllColors((v) => !v)}
+                className="mt-2 text-xs font-medium text-primary hover:text-primary-active"
+              >
+                {showAllColors ? 'Ver menos' : `Ver todos (${colors.length})`}
+              </button>
+            ) : null}
+            <div className="mt-3 flex items-center gap-2 border-t border-hairline pt-3">
+              <input
+                type="color"
+                value={textStyle.colorHex}
+                onChange={(e) => commitColor(e.target.value)}
+                aria-label="Elegir color personalizado"
+                className="h-8 w-10 cursor-pointer rounded border border-input-border bg-surface p-0.5"
+              />
+              <input
+                value={hexInput}
+                onChange={(e) => setHexInput(e.target.value.toUpperCase())}
+                onBlur={() => commitColor(hexInput)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    commitColor(hexInput, true)
+                  }
+                }}
+                maxLength={7}
+                aria-label="Color hexadecimal"
+                className="h-8 w-24 rounded-md border border-input-border px-2 font-mono text-xs uppercase text-ink outline-none focus:border-primary"
+              />
+            </div>
+          </div>
+        </>
+      ) : null}
     </div>
   )
 }

@@ -177,7 +177,7 @@ export function Workspace() {
       generateOpen && plan && sourceFile && nativeRoute?.eligible
         ? {
             sourceFileId: sourceFile.id,
-            jobs: buildNativeJobs(plan, sourceFile.tagLiterals, nativeRoute.edits),
+            jobs: buildNativeJobs(plan, sourceFile.tagLiterals, nativeRoute.edits, nativeRoute.styles ?? []),
           }
         : null,
     [generateOpen, plan, sourceFile, nativeRoute],
@@ -191,7 +191,7 @@ export function Workspace() {
       !currentGroup
     )
       return null
-    return buildNativeJobs(plan, sourceFile.tagLiterals, nativeRoute.edits)[
+    return buildNativeJobs(plan, sourceFile.tagLiterals, nativeRoute.edits, nativeRoute.styles ?? [])[
       Math.min(previewIndex, previewGroups.length - 1)
     ] ?? null
   }, [view, plan, sourceFile, nativeRoute, currentGroup, previewIndex, previewGroups.length])

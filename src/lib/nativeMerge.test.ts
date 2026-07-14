@@ -5,6 +5,8 @@ import {
   buildNativeJobs,
   decideNativeRoute,
   nativeTextSegments,
+  extractNativeFieldStyles,
+  sourceFieldOccurrences,
   tagLiterals,
   upgradeSourceFileMeta,
   type SourceFileMeta,
@@ -46,6 +48,38 @@ describe('tagLiterals', () => {
   it('captures a tag split across inline spans as one literal', () => {
     const lits = tagLiterals('<p>{{<span>NOMBRE</span>}}</p>')
     expect(lits['NOMBRE']).toEqual(['{{NOMBRE}}'])
+  })
+})
+
+describe('native field styles', () => {
+  it('extracts occurrence-specific wrappers and restores comparable HTML', () => {
+    const html = '<p>{{TAG}} y <span data-ttg-field-style style="font-size:14pt;color:#aabbcc">{{TAG}}</span></p>'
+    expect(extractNativeFieldStyles(html)).toEqual({
+      html: '<p>{{TAG}} y {{TAG}}</p>',
+      styles: [{ tag: 'TAG', occurrence: 1, fontSizePt: 14, colorHex: '#AABBCC' }],
+    })
+    expect(sourceFieldOccurrences('<p>{{ TAG }} {{TAG}}</p>')).toEqual([
+      { tag: 'TAG', literal: '{{ TAG }}', occurrence: 0 },
+      { tag: 'TAG', literal: '{{TAG}}', occurrence: 1 },
+    ])
+  })
+
+  it('rejects wrappers containing unrelated formatting', () => {
+    expect(extractNativeFieldStyles('<p><span data-ttg-field-style style="font-weight:bold">{{TAG}}</span></p>')).toBeNull()
+  })
+
+  it('keeps the native route for a supported field style', () => {
+    const source = '<p>{{TAG}} y {{TAG}}</p>'
+    const decision = decideNativeRoute({
+      sourceFile: meta({ fingerprint: fingerprintHtml(source), textSegments: nativeTextSegments(source) }),
+      editorHtml: '<p><span data-ttg-field-style style="color:#123456">{{TAG}}</span> y {{TAG}}</p>',
+      editorCss: 'p{color:red}',
+    })
+    expect(decision).toEqual({
+      eligible: true,
+      edits: [],
+      styles: [{ tag: 'TAG', occurrence: 0, colorHex: '#123456' }],
+    })
   })
 })
 

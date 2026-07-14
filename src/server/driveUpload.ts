@@ -89,7 +89,7 @@ export const driveUploadFn = createServerFn({ method: 'POST' })
       return { ok: true, data: { fileId } }
     } catch (err) {
       const base = asResultError(err, 'No se pudo subir el documento a Drive.')
-      const code = err instanceof g.GoogleError ? err.code : undefined
+      const code = err instanceof g.GoogleError && err.code === 'FOLDER_GONE' ? err.code : undefined
       return code ? { ...base, code } : base
     }
   })

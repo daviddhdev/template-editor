@@ -44,8 +44,8 @@ const DOCS_API = 'https://docs.googleapis.com/v1/documents'
 export class GoogleError extends Error {
   hint?: string
   /** Machine-readable code for errors the client must react to (not just show). */
-  code?: 'FOLDER_GONE'
-  constructor(message: string, hint?: string, code?: 'FOLDER_GONE') {
+  code?: 'FOLDER_GONE' | 'NATIVE_STYLE_MISMATCH'
+  constructor(message: string, hint?: string, code?: 'FOLDER_GONE' | 'NATIVE_STYLE_MISMATCH') {
     super(message)
     this.hint = hint
     this.code = code
@@ -494,6 +494,170 @@ export async function replaceAllTextInDoc(
     find: r.find,
     occurrences: data.replies?.[i]?.replaceAllText?.occurrencesChanged ?? 0,
   }))
+}
+
+interface DocsTextChunk {
+  startIndex: number
+  content: string
+}
+
+interface DocsTextSegment {
+  segmentId?: string
+  tabId?: string
+  order: number
+  chunks: DocsTextChunk[]
+}
+
+type DocsElement = {
+  startIndex?: number
+  paragraph?: { elements?: { startIndex?: number; textRun?: { content?: string } }[] }
+  table?: { tableRows?: { tableCells?: { content?: DocsElement[] }[] }[] }
+  tableOfContents?: { content?: DocsElement[] }
+}
+
+function collectChunks(elements: DocsElement[] | undefined, out: DocsTextChunk[]): void {
+  for (const element of elements ?? []) {
+    for (const inline of element.paragraph?.elements ?? []) {
+      const content = inline.textRun?.content
+      if (content !== undefined && inline.startIndex !== undefined) out.push({ startIndex: inline.startIndex, content })
+    }
+    for (const row of element.table?.tableRows ?? []) {
+      for (const cell of row.tableCells ?? []) collectChunks(cell.content, out)
+    }
+    collectChunks(element.tableOfContents?.content, out)
+  }
+}
+
+/** Flatten body/header/footer text runs while retaining Docs UTF-16 indices. */
+export function docsTextSegments(document: unknown): DocsTextSegment[] {
+  const doc = document as {
+    body?: { content?: DocsElement[] }
+    headers?: Record<string, { content?: DocsElement[] }>
+    footers?: Record<string, { content?: DocsElement[] }>
+    footnotes?: Record<string, { content?: DocsElement[] }>
+    tabs?: { tabProperties?: { tabId?: string }; documentTab?: unknown }[]
+  }
+  const segments: DocsTextSegment[] = []
+  let order = 0
+  const addDocument = (part: typeof doc, tabId?: string) => {
+    const add = (content: DocsElement[] | undefined, segmentId?: string) => {
+      const chunks: DocsTextChunk[] = []
+      collectChunks(content, chunks)
+      if (chunks.length) segments.push({ segmentId, tabId, order: order++, chunks })
+    }
+    add(part.body?.content)
+    for (const [id, value] of Object.entries(part.headers ?? {}).sort()) add(value.content, id)
+    for (const [id, value] of Object.entries(part.footers ?? {}).sort()) add(value.content, id)
+    for (const [id, value] of Object.entries(part.footnotes ?? {}).sort()) add(value.content, id)
+  }
+  if (doc.tabs?.length) {
+    for (const tab of doc.tabs) addDocument(tab.documentTab as typeof doc, tab.tabProperties?.tabId)
+  } else addDocument(doc)
+  return segments
+}
+
+export interface DocsStyleRange {
+  tag: string
+  startIndex: number
+  endIndex: number
+  segmentId?: string
+  tabId?: string
+  fontSizePt?: number
+  colorHex?: string
+}
+
+/** Resolve occurrence locators without ever guessing at a different range. */
+export function locateFieldStyleRanges(
+  document: unknown,
+  styles: { tag: string; occurrence: number; fontSizePt?: number; colorHex?: string }[],
+  replacements: { tag: string; finds: string[] }[],
+): DocsStyleRange[] | null {
+  const findsByTag = new Map(replacements.map((r) => [r.tag, [...new Set(r.finds)].sort((a, b) => b.length - a.length)]))
+  const segments = docsTextSegments(document)
+  const ranges: DocsStyleRange[] = []
+  for (const style of styles) {
+    const finds = findsByTag.get(style.tag) ?? []
+    const matches: { startIndex: number; endIndex: number; segmentId?: string; tabId?: string; order: number }[] = []
+    for (const segment of segments) {
+      const chunks = [...segment.chunks].sort((a, b) => a.startIndex - b.startIndex)
+      let groupStart = -1
+      let groupText = ''
+      let groupEnd = -1
+      const scan = () => {
+        for (const find of finds) {
+          let from = 0
+          while (from <= groupText.length - find.length) {
+            const at = groupText.indexOf(find, from)
+            if (at < 0) break
+            matches.push({ startIndex: groupStart + at, endIndex: groupStart + at + find.length, segmentId: segment.segmentId, tabId: segment.tabId, order: segment.order })
+            from = at + find.length
+          }
+        }
+      }
+      for (const chunk of chunks) {
+        if (groupStart < 0 || chunk.startIndex !== groupEnd) {
+          if (groupStart >= 0) scan()
+          groupStart = chunk.startIndex
+          groupText = chunk.content
+        } else groupText += chunk.content
+        groupEnd = chunk.startIndex + chunk.content.length
+      }
+      if (groupStart >= 0) scan()
+    }
+    matches.sort((a, b) => a.order - b.order || a.startIndex - b.startIndex)
+    const unique = matches.filter((match, i) => i === 0 || match.order !== matches[i - 1].order || match.startIndex !== matches[i - 1].startIndex)
+    const target = unique[style.occurrence]
+    if (!target) return null
+    ranges.push({
+      tag: style.tag,
+      startIndex: target.startIndex,
+      endIndex: target.endIndex,
+      segmentId: target.segmentId,
+      tabId: target.tabId,
+      fontSizePt: style.fontSizePt,
+      colorHex: style.colorHex,
+    })
+  }
+  return ranges
+}
+
+/** Apply per-occurrence styles before replaceAllText (replacement preserves formatting). */
+export async function applyFieldStylesInDoc(
+  token: string,
+  docId: string,
+  styles: { tag: string; occurrence: number; fontSizePt?: number; colorHex?: string }[],
+  replacements: { tag: string; finds: string[] }[],
+): Promise<void> {
+  const get = await fetch(`${DOCS_API}/${docId}?includeTabsContent=true`, { headers: { authorization: `Bearer ${token}` } })
+  if (!get.ok) throw await driveError(get, 'Google no pudo localizar los campos para aplicar su formato.')
+  const ranges = locateFieldStyleRanges(await get.json(), styles, replacements)
+  if (!ranges) {
+    throw new GoogleError(
+      'No se pudo identificar con seguridad una aparición de campo en el documento original.',
+      'El original puede haber cambiado. Reintenta este documento con la conversión HTML para conservar el tamaño y el color elegidos.',
+      'NATIVE_STYLE_MISMATCH',
+    )
+  }
+  const requests = ranges.map((range) => {
+    const textStyle: Record<string, unknown> = {}
+    const fields: string[] = []
+    if (range.fontSizePt !== undefined) {
+      textStyle.fontSize = { magnitude: range.fontSizePt, unit: 'PT' }
+      fields.push('fontSize')
+    }
+    if (range.colorHex) {
+      const n = Number.parseInt(range.colorHex.slice(1), 16)
+      textStyle.foregroundColor = { color: { rgbColor: { red: ((n >> 16) & 255) / 255, green: ((n >> 8) & 255) / 255, blue: (n & 255) / 255 } } }
+      fields.push('foregroundColor')
+    }
+    return { updateTextStyle: { range: { startIndex: range.startIndex, endIndex: range.endIndex, ...(range.segmentId ? { segmentId: range.segmentId } : {}), ...(range.tabId ? { tabId: range.tabId } : {}) }, textStyle, fields: fields.join(',') } }
+  })
+  const update = await fetch(`${DOCS_API}/${docId}:batchUpdate`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json; charset=UTF-8' },
+    body: JSON.stringify({ requests }),
+  })
+  if (!update.ok) throw await driveError(update, 'Google no pudo aplicar el formato de los campos.')
 }
 
 /** Export any Google file (Doc/Sheet) in the requested format via Drive.

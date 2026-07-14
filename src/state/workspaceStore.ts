@@ -15,6 +15,7 @@ import type { RawDocument } from '../lib/template/parse'
 import { fingerprintCss, fingerprintHtml, normalizeBodyHtml } from '../lib/fingerprint'
 import {
   nativeTextSegments,
+  sourceFieldOccurrences,
   tagLiterals,
   upgradeSourceFileMeta,
   type SourceFileMeta,
@@ -228,6 +229,7 @@ export const useWorkspace = create<WorkspaceState>()(
                 cssFingerprint: fingerprintCss(raw.css),
                 tagLiterals: tagLiterals(raw.bodyHtml),
                 textSegments: nativeTextSegments(normalizeBodyHtml(raw.bodyHtml)),
+                fieldOccurrences: sourceFieldOccurrences(raw.bodyHtml),
               }
             : null,
           view: 'edit',

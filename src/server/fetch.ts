@@ -18,7 +18,7 @@ import { requireOneOf, requireRecord, requireString } from './validate'
  * `code: 'AUTH'` = no session (or expired); the client redirects to /login. */
 export type Result<T> =
   | { ok: true; data: T }
-  | { ok: false; error: string; hint?: string; code?: 'AUTH' }
+  | { ok: false; error: string; hint?: string; code?: 'AUTH'; fallbackHtml?: boolean }
 
 type FetchError = { ok: false; error: string; hint?: string }
 

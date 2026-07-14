@@ -13,7 +13,8 @@
 
 import { HTMLElement, parse, TextNode } from 'node-html-parser'
 import type { GenerationPlan, RuleBindings } from '../types'
-import type { NativeJob, NativeReplacement } from '../server/googleNative'
+import type { NativeFieldStyle, NativeJob, NativeReplacement } from '../server/googleNative'
+import { colorToHex, FIELD_STYLE_ATTR, validFontSizePt } from './fieldAppearance'
 import { formatTagValue } from './engine/format'
 import { resolveBoundTag } from './engine/tagValue'
 import { fingerprintCss, fingerprintHtml, hashString, normalizeBodyHtml } from './fingerprint'
@@ -42,6 +43,15 @@ export interface SourceFileMeta {
    * Absent on recipes saved before native editable output was introduced.
    */
   textSegments?: NativeTextSegment[]
+  /** Field occurrences in source text order. Optional for older recipes. */
+  fieldOccurrences?: SourceFieldOccurrence[]
+}
+
+export interface SourceFieldOccurrence {
+  tag: string
+  literal: string
+  /** Zero-based among occurrences of the same tag. */
+  occurrence: number
 }
 
 export interface NativeTextSegment {
@@ -65,13 +75,14 @@ export function upgradeSourceFileMeta(
   editorHtml: string,
 ): SourceFileMeta | null {
   if (!sourceFile) return null
-  if (sourceFile.textSegments) return sourceFile
+  if (sourceFile.textSegments && sourceFile.fieldOccurrences) return sourceFile
   // Never bless the current HTML as "original" after an edit: old recipes
   // without a snapshot must still fall back unless their fingerprint matches.
   if (fingerprintHtml(editorHtml) !== sourceFile.fingerprint) return sourceFile
   return {
     ...sourceFile,
-    textSegments: nativeTextSegments(normalizeBodyHtml(editorHtml)),
+    textSegments: sourceFile.textSegments ?? nativeTextSegments(normalizeBodyHtml(editorHtml)),
+    fieldOccurrences: sourceFile.fieldOccurrences ?? sourceFieldOccurrences(editorHtml),
   }
 }
 
@@ -190,6 +201,100 @@ export function tagLiterals(bodyHtml: string): Record<string, string[]> {
   return out
 }
 
+export function sourceFieldOccurrences(bodyHtml: string): SourceFieldOccurrence[] {
+  const text = parse(`<div id="__root">${bodyHtml}</div>`, { comment: false }).textContent
+  const counts = new Map<string, number>()
+  const out: SourceFieldOccurrence[] = []
+  for (const match of text.matchAll(/\{\{[^{}]*\}\}/g)) {
+    const tag = match[0].slice(2, -2).trim()
+    if (!tag) continue
+    const occurrence = counts.get(tag) ?? 0
+    counts.set(tag, occurrence + 1)
+    out.push({ tag, literal: match[0], occurrence })
+  }
+  return out
+}
+
+interface ExtractedFieldStyles {
+  html: string
+  styles: NativeFieldStyle[]
+}
+
+/**
+ * Remove only wrappers created by the field-appearance UI and return their
+ * native equivalents. Any malformed/expanded wrapper is rejected so an
+ * arbitrary formatting edit can never be mistaken for a safe native patch.
+ */
+export function extractNativeFieldStyles(bodyHtml: string): ExtractedFieldStyles | null {
+  const root = parse(`<div id="__field_style_root">${bodyHtml}</div>`, { comment: false })
+  const content = root.querySelector('#__field_style_root')!
+  const wrappers = content.querySelectorAll(`[${FIELD_STYLE_ATTR}]`)
+  if (wrappers.length === 0) return { html: bodyHtml, styles: [] }
+
+  const details = new Map<HTMLElement, { tag: string; fontSizePt?: number; colorHex?: string }>()
+  for (const wrapper of wrappers) {
+    if (wrapper.rawTagName.toLowerCase() !== 'span') return null
+    if (Object.keys(wrapper.attributes).some((name) => name !== FIELD_STYLE_ATTR && name !== 'style')) return null
+    const literal = wrapper.textContent.trim()
+    const tagMatch = literal.match(/^\{\{([^{}]+)\}\}$/)
+    if (!tagMatch) return null
+    const declarations = new Map<string, string>()
+    for (const part of (wrapper.getAttribute('style') ?? '').split(';')) {
+      const colon = part.indexOf(':')
+      if (colon < 0) continue
+      const name = part.slice(0, colon).trim().toLowerCase()
+      const value = part.slice(colon + 1).trim()
+      if (name && value) declarations.set(name, value)
+    }
+    if ([...declarations.keys()].some((name) => name !== 'font-size' && name !== 'color')) return null
+    const sizeRaw = declarations.get('font-size')
+    const sizeMatch = sizeRaw?.match(/^([\d.]+)pt$/i)
+    const fontSizePt = sizeMatch ? Number(sizeMatch[1]) : undefined
+    if (sizeRaw && (!sizeMatch || !validFontSizePt(fontSizePt!))) return null
+    const colorRaw = declarations.get('color')
+    const colorHex = colorRaw ? colorToHex(colorRaw) ?? undefined : undefined
+    if (colorRaw && !colorHex) return null
+    if (fontSizePt === undefined && colorHex === undefined) return null
+    details.set(wrapper, { tag: tagMatch[1].trim(), fontSizePt, colorHex })
+  }
+
+  const counts = new Map<string, number>()
+  const styles: NativeFieldStyle[] = []
+  const visit = (node: HTMLElement | TextNode) => {
+    if (node instanceof TextNode) {
+      for (const match of node.rawText.matchAll(/\{\{([^{}]+)\}\}/g)) {
+        const tag = match[1].trim()
+        const occurrence = counts.get(tag) ?? 0
+        counts.set(tag, occurrence + 1)
+        let parent = node.parentNode
+        let owner: HTMLElement | null = null
+        while (parent && parent !== content) {
+          if (parent instanceof HTMLElement && details.has(parent)) {
+            owner = parent
+            break
+          }
+          parent = parent.parentNode
+        }
+        if (owner) {
+          const detail = details.get(owner)!
+          if (detail.tag !== tag || owner.textContent.trim() !== match[0]) return false
+          styles.push({ tag, occurrence, ...(detail.fontSizePt === undefined ? {} : { fontSizePt: detail.fontSizePt }), ...(detail.colorHex ? { colorHex: detail.colorHex } : {}) })
+        }
+      }
+      return true
+    }
+    for (const child of node.childNodes) {
+      if ((child instanceof HTMLElement || child instanceof TextNode) && !visit(child)) return false
+    }
+    return true
+  }
+  if (!visit(content)) return null
+  if (styles.length !== wrappers.length) return null
+
+  for (const wrapper of wrappers) wrapper.replaceWith(...wrapper.childNodes)
+  return { html: content.innerHTML, styles }
+}
+
 export type NativeFallbackReason =
   /** Blank document or template without an imported Drive file behind it. */
   | 'no_source'
@@ -209,16 +314,19 @@ export function decideNativeRoute(args: {
   editorHtml: string
   editorCss: string
   ruleBindings?: RuleBindings
-}): { eligible: true; edits: NativeEdit[] } | { eligible: false; reason: NativeFallbackReason } {
+}): { eligible: true; edits: NativeEdit[]; styles?: NativeFieldStyle[] } | { eligible: false; reason: NativeFallbackReason } {
   const { sourceFile, editorHtml, editorCss, ruleBindings } = args
   if (!sourceFile) return { eligible: false, reason: 'no_source' }
+  const extracted = extractNativeFieldStyles(editorHtml)
+  if (!extracted) return { eligible: false, reason: 'edited' }
+  const comparableHtml = extracted.html
   // In-app inline constructs make the route wrong regardless of what the
   // fingerprint says (independent of serialisation quirks) — and they get
   // their own reason so the UI can point at the anchored alternative.
   if (
-    editorHtml.includes('data-cond') ||
-    editorHtml.includes('data-ttg-repeat') ||
-    editorHtml.includes('ttg-chip')
+    comparableHtml.includes('data-cond') ||
+    comparableHtml.includes('data-ttg-repeat') ||
+    comparableHtml.includes('ttg-chip')
   ) {
     return { eligible: false, reason: 'inline_blocks' }
   }
@@ -228,12 +336,14 @@ export function decideNativeRoute(args: {
   if (fingerprintCss(editorCss) !== sourceFile.cssFingerprint) {
     return { eligible: false, reason: 'css_changed' }
   }
-  if (fingerprintHtml(editorHtml) === sourceFile.fingerprint) return { eligible: true, edits: [] }
+  if (fingerprintHtml(comparableHtml) === sourceFile.fingerprint) {
+    return { eligible: true, edits: [], ...(extracted.styles.length ? { styles: extracted.styles } : {}) }
+  }
 
   // Old saved recipes have no source snapshot. Staying conservative avoids
   // silently exporting the original while ignoring an edit.
   if (!sourceFile.textSegments) return { eligible: false, reason: 'edited' }
-  const current = nativeTextSegments(normalizeBodyHtml(editorHtml))
+  const current = nativeTextSegments(normalizeBodyHtml(comparableHtml))
   if (current.length !== sourceFile.textSegments.length) {
     return { eligible: false, reason: 'edited' }
   }
@@ -253,7 +363,7 @@ export function decideNativeRoute(args: {
     if (!edit) return { eligible: false, reason: 'edited' }
     edits.push(edit)
   }
-  return { eligible: true, edits }
+  return { eligible: true, edits, ...(extracted.styles.length ? { styles: extracted.styles } : {}) }
 }
 
 /**
@@ -269,6 +379,7 @@ export function buildNativeJobs(
   plan: GenerationPlan,
   literals: Record<string, string[]>,
   edits: NativeEdit[] = [],
+  styles: NativeFieldStyle[] = [],
 ): NativeJob[] {
   const sub = { mapping: plan.mapping, onMissing: 'empty' as const, tagFormats: plan.tagFormats }
   return planGroups(plan).map((group) => {
@@ -286,6 +397,6 @@ export function buildNativeJobs(
         replace: column ? formatTagValue(tag, row[column] ?? '', plan.tagFormats) : '',
       }
     })
-    return { name: group.key, edits, replacements }
+    return { name: group.key, edits, ...(styles.length ? { styles } : {}), replacements }
   })
 }
