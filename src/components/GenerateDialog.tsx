@@ -105,8 +105,8 @@ export function GenerateDialog({
   const [withDocx, setWithDocx] = useState(false)
   // Output folder is per template (saved with the recipe); the user pastes its
   // Drive URL. A template with a folder configured uploads by default.
-  // savedRecipe/dataKind/dataUrl/data feed the generation audit log.
-  const { outputFolderUrl, setOutputFolderUrl, savedRecipe, dataKind, dataUrl, data } =
+  // savedRecipe/dataKind/dataUrl feed the generation audit log.
+  const { outputFolderUrl, setOutputFolderUrl, savedRecipe, dataKind, dataUrl } =
     useWorkspace()
   const canWrite = google?.canWrite ?? false
   const [uploadToDrive, setUploadToDrive] = useState(
@@ -158,6 +158,38 @@ export function GenerateDialog({
       pdfJob: jobs[i] ?? null,
     }))
   }, [native, jobs])
+
+  // Which documents to actually generate (default: all checked). The pre-start
+  // checklist toggles indices into `units`; everything downstream runs over
+  // `activeUnits` so native+HTML stay positionally paired WITHIN the subset.
+  const [selected, setSelected] = useState<Set<number>>(() => new Set(units.map((_, i) => i)))
+  const [query, setQuery] = useState('')
+
+  const activeUnits = useMemo(() => units.filter((_, i) => selected.has(i)), [units, selected])
+
+  // Rows shown in the checklist: filtered by the search box (label match only,
+  // accent/case-insensitive). Hidden rows keep their checked state.
+  const shownUnits = useMemo(() => {
+    const q = norm(query)
+    return units
+      .map((unit, i) => ({ unit, i }))
+      .filter(({ unit }) => !q || norm(unit.name).includes(q))
+  }, [units, query])
+
+  const toggleUnit = (i: number) =>
+    setSelected((s) => {
+      const next = new Set(s)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+  const setShownSelected = (on: boolean) =>
+    setSelected((s) => {
+      const next = new Set(s)
+      for (const { i } of shownUnits) if (on) next.add(i)
+      else next.delete(i)
+      return next
+    })
 
   const patch = (i: number, p: Partial<DocProgress>) =>
     setDocs((d) => {
@@ -269,10 +301,10 @@ export function GenerateDialog({
   async function runOne(i: number, asHtml: boolean) {
     patch(i, { status: 'running', error: undefined })
     const t0 = Date.now()
-    let res = await callOne(units[i], asHtml)
+    let res = await callOne(activeUnits[i], asHtml)
     let automaticHtmlFallback = false
-    if (!asHtml && !res.ok && res.fallbackHtml && units[i].pdfJob) {
-      res = await callOne(units[i], true)
+    if (!asHtml && !res.ok && res.fallbackHtml && activeUnits[i].pdfJob) {
+      res = await callOne(activeUnits[i], true)
       automaticHtmlFallback = res.ok
     }
     durations.current.push(Date.now() - t0)
@@ -280,7 +312,7 @@ export function GenerateDialog({
       if (res.unmatched?.length) {
         setUnmatched((prev) => [...new Set([...prev, ...res.unmatched!])].sort())
       }
-      patch(i, { status: 'done', files: res.files, viaHtml: asHtml || automaticHtmlFallback || !(viaNative && units[i].nativeJob) })
+      patch(i, { status: 'done', files: res.files, viaHtml: asHtml || automaticHtmlFallback || !(viaNative && activeUnits[i].nativeJob) })
       if (uploadToDrive && canWrite) await uploadDoc(i, res.files)
     } else {
       patch(i, { status: 'error', error: { error: res.error, hint: res.hint } })
@@ -290,7 +322,7 @@ export function GenerateDialog({
   /** Generate every document that is not already done (start or resume). */
   async function run(current: DocProgress[] | null) {
     const base =
-      current ?? units.map((u): DocProgress => ({ name: u.name, status: 'pending', files: [] }))
+      current ?? activeUnits.map((u): DocProgress => ({ name: u.name, status: 'pending', files: [] }))
     setDocs(base)
     docsRef.current = base
     setRunning(true)
@@ -310,16 +342,16 @@ export function GenerateDialog({
           route: viaNative ? 'native' : viaGoogle ? 'google_html' : 'local',
           dataKind,
           dataUrl,
-          rowCount: data?.rows.length ?? 0,
+          rowCount: activeUnits.length,
           formats: withDocx && viaGoogle ? ['pdf', 'docx'] : ['pdf'],
-          docNames: units.map((u) => u.name),
+          docNames: activeUnits.map((u) => u.name),
         },
       })
         .then((r) => (r.ok ? r.data.id : null))
         .catch(() => null)
     }
     startRef.current = Date.now()
-    for (let i = 0; i < units.length; i++) {
+    for (let i = 0; i < activeUnits.length; i++) {
       if (cancelRef.current) break
       if (base[i].status === 'done') continue
       await runOne(i, false)
@@ -344,7 +376,7 @@ export function GenerateDialog({
     setRunning(true)
     cancelRef.current = false
     startRef.current = Date.now()
-    for (let i = 0; i < units.length; i++) {
+    for (let i = 0; i < activeUnits.length; i++) {
       if (cancelRef.current) break
       if (docs[i].status === 'error') await runOne(i, true)
     }
@@ -389,8 +421,8 @@ export function GenerateDialog({
             <div>
               <h2 className="text-lg font-semibold text-ink">Generar los documentos</h2>
               <p className="text-sm text-ink-muted">
-                Se crearán <strong>{units.length}</strong>{' '}
-                {units.length === 1 ? 'documento' : 'documentos'} en PDF.
+                Se crearán <strong>{activeUnits.length}</strong>{' '}
+                {activeUnits.length === 1 ? 'documento' : 'documentos'} en PDF.
               </p>
             </div>
           </div>
@@ -452,6 +484,63 @@ export function GenerateDialog({
 
         {!started ? (
           <div className="space-y-3">
+            {units.length > 1 ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-ink-secondary">Documentos a generar</span>
+                  <span className="text-xs text-ink-muted">
+                    {selected.size} de {units.length} seleccionados
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Buscar por nombre…"
+                    aria-label="Buscar documentos por nombre"
+                    className="min-w-0 flex-1 rounded-md border border-input-border bg-surface px-2.5 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShownSelected(true)}
+                    className="rounded-md px-2 py-1 text-xs text-primary outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    Todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShownSelected(false)}
+                    className="rounded-md px-2 py-1 text-xs text-ink-muted outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    Ninguno
+                  </button>
+                </div>
+                <ul className="max-h-52 divide-y divide-hairline/60 overflow-y-auto rounded-lg border border-hairline">
+                  {shownUnits.length === 0 ? (
+                    <li className="px-3 py-2 text-xs text-ink-faint">
+                      Ningún documento coincide con «{query}».
+                    </li>
+                  ) : (
+                    shownUnits.map(({ unit, i }) => (
+                      <li key={i}>
+                        <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-ink-secondary hover:bg-black/5">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(i)}
+                            onChange={() => toggleUnit(i)}
+                            className="h-4 w-4 shrink-0 rounded border-input-border accent-primary"
+                          />
+                          <span className="min-w-0 flex-1 truncate" title={unit.name}>
+                            {unit.name}
+                          </span>
+                        </label>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+            ) : null}
             {viaGoogle ? (
               <>
                 <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-secondary">
@@ -525,11 +614,13 @@ export function GenerateDialog({
             )}
             <Button
               onClick={() => run(null)}
-              disabled={uploadToDrive && canWrite && !outputFolderId}
+              disabled={(uploadToDrive && canWrite && !outputFolderId) || selected.size === 0}
               title={
-                uploadToDrive && canWrite && !outputFolderId
-                  ? 'Pega la URL de la carpeta de Drive de salida (o desmarca la subida)'
-                  : undefined
+                selected.size === 0
+                  ? 'Marca al menos un documento'
+                  : uploadToDrive && canWrite && !outputFolderId
+                    ? 'Pega la URL de la carpeta de Drive de salida (o desmarca la subida)'
+                    : undefined
               }
             >
               <Download className="h-4 w-4" /> Generar {withDocx && viaGoogle ? 'PDF + Word' : 'PDF'}
@@ -689,6 +780,15 @@ export function GenerateDialog({
       </div>
     </div>
   )
+}
+
+/** Normalise a label for accent/case-insensitive search matching. */
+export function norm(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim()
 }
 
 /** Status line when not running: finished, cancelled midway, or with errors. */
