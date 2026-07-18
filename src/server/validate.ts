@@ -5,6 +5,8 @@
  * explode inside the handler. These keep the checks one line per field.
  */
 
+import type { ApiSourceConfig } from '../types'
+
 /** Thrown on malformed input; the transport surfaces it as a request error. */
 export class ValidationError extends Error {}
 
@@ -73,4 +75,20 @@ export function requirePdfJobs(v: unknown): { name: string; html: string }[] {
 export function optionalFormats(v: unknown): ('pdf' | 'docx')[] | undefined {
   if (v === undefined || v === null) return undefined
   return requireArray(v, 'formats').map((f) => requireOneOf(f, ['pdf', 'docx'], 'formats'))
+}
+
+/** The API-source config carried by a data fetch / probe (types.ts). */
+export function optionalApiConfig(v: unknown): ApiSourceConfig | undefined {
+  if (v === undefined || v === null) return undefined
+  const r = requireRecord(v, 'apiConfig')
+  return {
+    authUrl: requireString(r.authUrl, 'apiConfig.authUrl'),
+    authBody: requireString(r.authBody, 'apiConfig.authBody'),
+    tokenPath: requireString(r.tokenPath, 'apiConfig.tokenPath'),
+    dataUrl: requireString(r.dataUrl, 'apiConfig.dataUrl'),
+    recordsPath: requireString(r.recordsPath, 'apiConfig.recordsPath'),
+    columns: requireArray(r.columns, 'apiConfig.columns').map((c, i) =>
+      requireString(c, `apiConfig.columns[${i}]`),
+    ),
+  }
 }

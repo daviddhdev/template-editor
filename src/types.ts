@@ -67,6 +67,33 @@ export interface DataSourceData {
   rows: Record<string, string>[]
 }
 
+/**
+ * How to read a customer's own REST API (kind 'api_endpoint'). v1 does a
+ * token-exchange: POST the login body to `authUrl`, take the bearer token from
+ * the response, then GET `dataUrl` with `Authorization: Bearer <token>`. The
+ * data response is arbitrary JSON; the user points `recordsPath` at the list
+ * and picks which flattened leaf fields (`columns`) become table columns.
+ */
+export interface ApiSourceConfig {
+  /** Login endpoint (POST JSON). '' = no login (GET the data directly). */
+  authUrl: string
+  /** Login POST body (JSON text). SENSITIVE: encrypted at rest, and redacted
+   * (emptied) before a saved recipe is sent to the browser. */
+  authBody: string
+  /** Dot-path to the token in the login response. '' = auto-detect. */
+  tokenPath: string
+  /** Data endpoint (GET). */
+  dataUrl: string
+  /** Dot-path to the records array in the data response. '' = the root array. */
+  recordsPath: string
+  /** Flattened leaf dot-paths chosen as columns, in order. */
+  columns: string[]
+  /** Read-only hint set by the server when returning a saved recipe: the DB
+   * holds encrypted credentials even though `authBody` came back empty. Not
+   * persisted (the real secret lives encrypted inside the stored config). */
+  authBodyStored?: boolean
+}
+
 /** tag name -> source column name (or null when still unmapped). */
 export type TagMapping = Record<string, string | null>
 
@@ -212,6 +239,9 @@ export interface Recipe {
   editorBodyClass: string
   dataKind: DataSourceKind
   dataUrl: string
+  /** API-source configuration when dataKind is 'api_endpoint'. Absent for
+   * sheet-backed recipes and those saved before API sources existed. */
+  apiConfig?: ApiSourceConfig
   mapping: TagMapping
   /** Tag -> rule bindings (anchored conditionals/repeats). Absent in old recipes. */
   ruleBindings?: RuleBindings

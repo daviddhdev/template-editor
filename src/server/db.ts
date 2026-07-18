@@ -124,6 +124,9 @@ const MIGRATIONS: string[] = [
   )`,
   // Tag -> display format (fecha larga, importe en letra…), lib/engine/format.ts.
   `ALTER TABLE recipes ADD COLUMN tag_formats jsonb NOT NULL DEFAULT '{}'`,
+  // Configuración de la fuente API externa (endpoints, columnas elegidas y las
+  // credenciales de login CIFRADAS en authBodyEnc). Nulo para recetas de hoja.
+  `ALTER TABLE recipes ADD COLUMN api_config jsonb`,
 ]
 
 let client: postgres.Sql | null = null

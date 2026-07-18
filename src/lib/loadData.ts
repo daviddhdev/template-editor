@@ -56,8 +56,13 @@ export async function loadDataIntoWorkspace(
   kind: DataSourceKind,
   origin: string,
 ): Promise<LoadDataResult> {
+  // API source: send its config (and the saved recipe id, so the server can
+  // decrypt stored credentials when the login body came back redacted).
+  const pre = useWorkspace.getState()
+  const apiConfig = kind === 'api_endpoint' ? (pre.apiConfig ?? undefined) : undefined
+  const recipeId = pre.savedRecipe?.id
   const [res, tabsRes] = await Promise.all([
-    fetchDataFn({ data: { kind, origin } }),
+    fetchDataFn({ data: { kind, origin, apiConfig, recipeId } }),
     kind === 'google_sheet'
       ? listSheetTabsFn({ data: { origin } }).catch(() => ({ ok: true as const, data: [] as SheetTab[] }))
       : Promise.resolve({ ok: true as const, data: [] as SheetTab[] }),

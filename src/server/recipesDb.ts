@@ -1,7 +1,14 @@
 import { createServerFn } from '@tanstack/react-start'
 import type { Result } from './fetch'
-import type { DataSourceKind, Recipe } from '../types'
-import { optionalString, requireOneOf, requireRecord, requireString, requireUuid } from './validate'
+import type { ApiSourceConfig, DataSourceKind, Recipe } from '../types'
+import {
+  optionalApiConfig,
+  optionalString,
+  requireOneOf,
+  requireRecord,
+  requireString,
+  requireUuid,
+} from './validate'
 
 /**
  * Template library (recipes) on Postgres — the durable, multi-user-ready home
@@ -35,6 +42,67 @@ function dbError(err: unknown): { ok: false; error: string; hint?: string } {
 /** Payload to save: a Recipe minus the DB-managed fields. */
 export type RecipeInput = Omit<Recipe, 'id' | 'savedAt'>
 
+/**
+ * DB shape of the `api_config` column: identical to {@link ApiSourceConfig}
+ * except the login body is stored ENCRYPTED (`authBodyEnc`) and never in the
+ * clear — and never sent back to the client (see {@link fromStoredApiConfig}).
+ */
+interface StoredApiConfig {
+  authUrl: string
+  authBodyEnc: string
+  tokenPath: string
+  dataUrl: string
+  recordsPath: string
+  columns: string[]
+}
+
+/** Client config → stored shape, encrypting the login body. An empty incoming
+ * `authBody` (redacted on read) keeps the previously stored secret `prevEnc`.
+ * `encrypt` is passed in so crypto (node-only) stays a dynamic server import. */
+function toStoredApiConfig(
+  cfg: ApiSourceConfig | undefined,
+  prevEnc: string,
+  encrypt: (plain: string) => string,
+): StoredApiConfig | null {
+  if (!cfg) return null
+  return {
+    authUrl: cfg.authUrl,
+    authBodyEnc: cfg.authBody ? encrypt(cfg.authBody) : prevEnc,
+    tokenPath: cfg.tokenPath,
+    dataUrl: cfg.dataUrl,
+    recordsPath: cfg.recordsPath,
+    columns: cfg.columns,
+  }
+}
+
+/** Stored shape → client config, with the credentials REDACTED (never leave
+ * the server); `authBodyStored` tells the UI a secret exists in the DB. */
+function fromStoredApiConfig(raw: unknown): ApiSourceConfig | undefined {
+  if (raw == null || typeof raw !== 'object') return undefined
+  const s = raw as Partial<StoredApiConfig>
+  return {
+    authUrl: s.authUrl ?? '',
+    authBody: '',
+    authBodyStored: Boolean(s.authBodyEnc),
+    tokenPath: s.tokenPath ?? '',
+    dataUrl: s.dataUrl ?? '',
+    recordsPath: s.recordsPath ?? '',
+    columns: s.columns ?? [],
+  }
+}
+
+/** The encrypted login body stored for a recipe, or '' — used when updating
+ * with redacted credentials and when a data fetch reads a saved recipe. */
+export async function storedAuthBodyEnc(
+  sql: import('postgres').Sql,
+  recipeId: string,
+  ownerId: string,
+): Promise<string> {
+  const rows = await sql`SELECT api_config FROM recipes WHERE id = ${recipeId} AND owner_id = ${ownerId}`
+  const raw = rows[0]?.api_config as Partial<StoredApiConfig> | null | undefined
+  return raw?.authBodyEnc ?? ''
+}
+
 /** Validate the essentials of a recipe payload; JSON columns pass through. */
 function validRecipe(v: unknown): RecipeInput {
   const r = requireRecord(v, 'recipe')
@@ -47,6 +115,7 @@ function validRecipe(v: unknown): RecipeInput {
     editorBodyClass: requireString(r.editorBodyClass, 'editorBodyClass'),
     dataKind: requireOneOf<DataSourceKind>(r.dataKind, ['google_sheet', 'api_endpoint'], 'dataKind'),
     dataUrl: requireString(r.dataUrl, 'dataUrl'),
+    apiConfig: optionalApiConfig(r.apiConfig),
     mapping: requireRecord(r.mapping, 'mapping') as RecipeInput['mapping'],
     ruleBindings: (r.ruleBindings === undefined
       ? undefined
@@ -159,6 +228,7 @@ export const getRecipeFn = createServerFn({ method: 'POST' })
           editorBodyClass: r.editor_body_class,
           dataKind: r.data_kind,
           dataUrl: r.data_url,
+          apiConfig: fromStoredApiConfig(r.api_config),
           mapping: r.mapping,
           ruleBindings: r.rule_bindings ?? {},
           tagFormats: r.tag_formats ?? {},
@@ -184,12 +254,17 @@ export const saveRecipeFn = createServerFn({ method: 'POST' })
       const sql = await getSql()
       const r = data.recipe
       const thumbnail = await renderThumbnail(r)
+      // New recipe: no previous secret to preserve.
+      const { encryptSecret } = await import('./crypto')
+      const apiConfig = toStoredApiConfig(r.apiConfig, '', encryptSecret)
       const rows = await sql`
         INSERT INTO recipes (owner_id, name, template_url, editor_html, editor_css, editor_title,
-          editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
+          editor_body_class, data_kind, data_url, api_config, mapping, group_config, rule_bindings,
           tag_formats, source_file, output_folder_url, thumbnail)
         VALUES (${user.id}, ${r.name}, ${r.templateUrl}, ${r.editorHtml}, ${r.editorCss}, ${r.editorTitle},
-          ${r.editorBodyClass}, ${r.dataKind}, ${r.dataUrl}, ${sql.json(r.mapping)},
+          ${r.editorBodyClass}, ${r.dataKind}, ${r.dataUrl},
+          ${apiConfig ? sql.json(apiConfig as unknown as Parameters<typeof sql.json>[0]) : null},
+          ${sql.json(r.mapping)},
           ${sql.json(r.group as unknown as Parameters<typeof sql.json>[0])},
           ${sql.json((r.ruleBindings ?? {}) as unknown as Parameters<typeof sql.json>[0])},
           ${sql.json((r.tagFormats ?? {}) as unknown as Parameters<typeof sql.json>[0])},
@@ -217,11 +292,17 @@ export const updateRecipeFn = createServerFn({ method: 'POST' })
       const sql = await getSql()
       const r = data.recipe
       const thumbnail = await renderThumbnail(r)
+      // Redacted credentials come back empty: keep the secret already stored.
+      const prevEnc =
+        r.apiConfig && !r.apiConfig.authBody ? await storedAuthBodyEnc(sql, data.id, user.id) : ''
+      const { encryptSecret } = await import('./crypto')
+      const apiConfig = toStoredApiConfig(r.apiConfig, prevEnc, encryptSecret)
       const rows = await sql`
         UPDATE recipes SET name = ${r.name}, template_url = ${r.templateUrl},
           editor_html = ${r.editorHtml}, editor_css = ${r.editorCss},
           editor_title = ${r.editorTitle}, editor_body_class = ${r.editorBodyClass},
           data_kind = ${r.dataKind}, data_url = ${r.dataUrl},
+          api_config = ${apiConfig ? sql.json(apiConfig as unknown as Parameters<typeof sql.json>[0]) : null},
           mapping = ${sql.json(r.mapping)},
           group_config = ${sql.json(r.group as unknown as Parameters<typeof sql.json>[0])},
           rule_bindings = ${sql.json((r.ruleBindings ?? {}) as unknown as Parameters<typeof sql.json>[0])},
@@ -277,10 +358,10 @@ export const duplicateRecipeFn = createServerFn({ method: 'POST' })
       const sql = await getSql()
       const rows = await sql`
         INSERT INTO recipes (owner_id, name, template_url, editor_html, editor_css, editor_title,
-          editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
+          editor_body_class, data_kind, data_url, api_config, mapping, group_config, rule_bindings,
           source_file, output_folder_url, thumbnail)
         SELECT owner_id, name || ' (copia)', template_url, editor_html, editor_css, editor_title,
-          editor_body_class, data_kind, data_url, mapping, group_config, rule_bindings,
+          editor_body_class, data_kind, data_url, api_config, mapping, group_config, rule_bindings,
           source_file, output_folder_url, thumbnail
         FROM recipes WHERE id = ${data.id} AND owner_id = ${user.id}
         RETURNING id`

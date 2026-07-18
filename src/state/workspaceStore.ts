@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import type {
+  ApiSourceConfig,
   ConditionalRule,
   DataSourceData,
   DataSourceKind,
@@ -96,6 +97,10 @@ interface WorkspaceState {
   // Data
   dataKind: DataSourceKind
   dataUrl: string
+  /** API-source config when dataKind is 'api_endpoint' (types.ts). Null for a
+   * sheet. Its `authBody` is only populated in the session where the user typed
+   * it; a recipe reloads it redacted (authBodyStored flags a stored secret). */
+  apiConfig: ApiSourceConfig | null
   data: DataSourceData | null
   /** Tabs of the loaded spreadsheet (empty = unknown/not a sheet). */
   sheetTabs: { gid: string; title: string }[]
@@ -149,6 +154,7 @@ interface WorkspaceState {
 
   setDataKind: (k: DataSourceKind) => void
   setDataUrl: (url: string) => void
+  setApiConfig: (c: ApiSourceConfig | null) => void
   setData: (d: DataSourceData) => void
   setSheetTabs: (tabs: { gid: string; title: string }[]) => void
 
@@ -199,6 +205,7 @@ export const useWorkspace = create<WorkspaceState>()(
       sourceFile: null,
       dataKind: 'google_sheet',
       dataUrl: '',
+      apiConfig: null,
       data: null,
       sheetTabs: [],
       mapping: {},
@@ -255,6 +262,7 @@ export const useWorkspace = create<WorkspaceState>()(
 
       setDataKind: (dataKind) => set({ dataKind }),
       setDataUrl: (dataUrl) => set({ dataUrl }),
+      setApiConfig: (apiConfig) => set({ apiConfig }),
       setData: (data) => set({ data }),
       setSheetTabs: (sheetTabs) => set({ sheetTabs }),
 
@@ -353,6 +361,7 @@ export const useWorkspace = create<WorkspaceState>()(
           sourceFile: upgradeSourceFileMeta(r.sourceFile, r.editorHtml),
           dataKind: r.dataKind,
           dataUrl: r.dataUrl,
+          apiConfig: r.apiConfig ?? null,
           data: null, // rows are per-batch: reloaded from the source each time
           sheetTabs: [],
           mapping: r.mapping,
@@ -377,6 +386,7 @@ export const useWorkspace = create<WorkspaceState>()(
           sourceFile: null,
           dataKind: 'google_sheet',
           dataUrl: '',
+          apiConfig: null,
           data: null,
           sheetTabs: [],
           mapping: {},
@@ -404,6 +414,10 @@ export const useWorkspace = create<WorkspaceState>()(
         sourceFile: s.sourceFile,
         dataKind: s.dataKind,
         dataUrl: s.dataUrl,
+        // Never persist the plaintext login body to the draft: a saved recipe
+        // reloads it from its encrypted copy (via recipeId); an unsaved one is
+        // re-entered. Keeps credentials out of localStorage / workspace_drafts.
+        apiConfig: s.apiConfig ? { ...s.apiConfig, authBody: '' } : null,
         data: s.data,
         sheetTabs: s.sheetTabs,
         mapping: s.mapping,
@@ -456,6 +470,7 @@ export async function rehydrateStores(user: { id: string; email: string }): Prom
       sourceFile: null,
       dataKind: 'google_sheet',
       dataUrl: '',
+      apiConfig: null,
       data: null,
       sheetTabs: [],
       mapping: {},

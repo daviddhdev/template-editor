@@ -8,6 +8,7 @@ import { canonicalPickedUrl } from '../lib/googlePicker'
 import { extractGoogleId, extractSheetGid, withSheetGid } from '../lib/url'
 import type { DataSourceKind } from '../types'
 import { PickerButton } from './PickerButton'
+import { ApiSourceDialog } from './ApiSourceDialog'
 import { Button, ErrorNote, Spinner } from './ui'
 
 type LoadError = { error: string; hint?: string } | null
@@ -51,6 +52,7 @@ export function TopBar({
 
   const [docLoading, setDocLoading] = useState(false)
   const [dataLoading, setDataLoading] = useState(false)
+  const [showApiDialog, setShowApiDialog] = useState(false)
   const [error, setError] = useState<LoadError>(null)
 
   // What each input last loaded successfully — pasting the SAME link again
@@ -194,7 +196,7 @@ export function TopBar({
             aria-label="Origen de los datos"
           >
             <option value="google_sheet">Hoja de Google</option>
-            <option value="api_endpoint">API externa (próximamente)</option>
+            <option value="api_endpoint">API externa</option>
           </select>
           <div className="flex h-[38px] min-w-0 flex-1 items-center gap-2 rounded-lg border border-input-border bg-surface px-3 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/10">
             <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
@@ -224,7 +226,11 @@ export function TopBar({
                 void loadData(url)
               }}
             />
-          ) : null}
+          ) : (
+            <Button variant="secondary" onClick={() => setShowApiDialog(true)}>
+              Configurar API
+            </Button>
+          )}
           <Button
             variant="secondary"
             onClick={() => loadData()}
@@ -334,6 +340,10 @@ export function TopBar({
         <div className="mt-3">
           <ErrorNote title={error.error} hint={error.hint} />
         </div>
+      ) : null}
+
+      {showApiDialog ? (
+        <ApiSourceDialog onClose={() => setShowApiDialog(false)} onUse={(url) => void loadData(url)} />
       ) : null}
     </div>
   )

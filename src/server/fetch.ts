@@ -1,6 +1,8 @@
 import { createServerFn } from '@tanstack/react-start'
-import type { DataSourceData, DataSourceKind } from '../types'
+import type { ApiSourceConfig, DataSourceData, DataSourceKind } from '../types'
 import { createDataSource, DataSourceError } from '../lib/datasource'
+import { apiDataJson, apiLoginJson, tokenFrom } from '../lib/datasource/apiEndpointSource'
+import { extractColumns, findRecordArrays, getByPath } from '../lib/datasource/apiShape'
 import { extractDocument, type RawDocument } from '../lib/template/parse'
 import { annotatePageBreaks, extractPageStartTexts } from '../lib/template/pageSync'
 import { repairFloatingHeaders } from '../lib/template/repairFloatingHeaders'
@@ -12,7 +14,14 @@ import {
   googleDocPdfExportUrl,
   looksLikeAccessWall,
 } from '../lib/url'
-import { requireOneOf, requireRecord, requireString } from './validate'
+import {
+  optionalApiConfig,
+  requireOneOf,
+  requireRecord,
+  requireString,
+  requireUuid,
+  ValidationError,
+} from './validate'
 
 /** Discriminated result so the UI can show friendly errors without try/catch.
  * `code: 'AUTH'` = no session (or expired); the client redirects to /login. */
@@ -182,6 +191,10 @@ export const fetchDataFn = createServerFn({ method: 'POST' })
     return {
       kind: requireOneOf<DataSourceKind>(i.kind, ['google_sheet', 'api_endpoint'], 'kind'),
       origin: requireString(i.origin, 'origin'),
+      apiConfig: optionalApiConfig(i.apiConfig),
+      // The saved recipe whose (encrypted) credentials to use when the client's
+      // apiConfig came back with its login body redacted.
+      recipeId: i.recipeId === undefined ? undefined : requireUuid(i.recipeId, 'recipeId'),
     }
   })
   .handler(async ({ data }): Promise<Result<DataSourceData>> => {
@@ -189,6 +202,12 @@ export const fetchDataFn = createServerFn({ method: 'POST' })
     const user = await s.requireUser()
     if (!user) return s.AUTH_ERROR
     let authError: FetchError | null = null
+
+    // API source: fill the (redacted) login body from the stored recipe secret.
+    const apiConfig =
+      data.kind === 'api_endpoint'
+        ? await resolveApiCredentials(user.id, data.apiConfig, data.recipeId)
+        : undefined
 
     if (data.kind === 'google_sheet') {
       const id = extractGoogleId(data.origin)
@@ -219,7 +238,7 @@ export const fetchDataFn = createServerFn({ method: 'POST' })
     }
 
     try {
-      const source = createDataSource(data.kind, data.origin)
+      const source = createDataSource(data.kind, data.origin, apiConfig)
       const result = await source.fetchData()
       return { ok: true, data: result }
     } catch (err) {
@@ -230,6 +249,78 @@ export const fetchDataFn = createServerFn({ method: 'POST' })
         return { ok: false, error: err.message, hint: err.hint }
       }
       return { ok: false, error: 'No se pudieron leer los datos. Revisa el enlace e inténtalo de nuevo.' }
+    }
+  })
+
+/**
+ * Resolve the login body for an API source: when the client sent it empty
+ * (redacted after loading a saved recipe) but the recipe has stored, encrypted
+ * credentials, decrypt those. Anything else is returned unchanged.
+ */
+async function resolveApiCredentials(
+  userId: string,
+  apiConfig: ApiSourceConfig | undefined,
+  recipeId: string | undefined,
+): Promise<ApiSourceConfig | undefined> {
+  if (!apiConfig || apiConfig.authBody || !apiConfig.authUrl || !recipeId) return apiConfig
+  const { getSql } = await import('./db')
+  const { storedAuthBodyEnc } = await import('./recipesDb')
+  const { decryptSecret } = await import('./crypto')
+  const enc = await storedAuthBodyEnc(await getSql(), recipeId, userId)
+  return enc ? { ...apiConfig, authBody: decryptSecret(enc) } : apiConfig
+}
+
+/** What the API-config dialog needs after a probe: whether a token was obtained
+ * and the candidate record lists (each with its discovered columns). */
+export interface ApiProbeResult {
+  /** True when a token was found — or none is needed (no login URL). */
+  tokenFound: boolean
+  /** Arrays-of-objects in the data response, each with its flattened columns. */
+  recordArrays: { path: string; count: number; columns: string[] }[]
+}
+
+/** Column discovery from a sample: bound the work to the first rows. */
+const PROBE_SAMPLE = 20
+
+/**
+ * Dry-run an API source for the "Configurar API" dialog: log in (if configured),
+ * report whether a token was obtained, then GET the data and list the candidate
+ * record arrays with their columns — so the user can point at the records and
+ * pick columns. Never returns the token itself.
+ */
+export const probeApiSourceFn = createServerFn({ method: 'POST' })
+  .validator((input: unknown) => {
+    const i = requireRecord(input, 'petición')
+    const apiConfig = optionalApiConfig(i.apiConfig)
+    if (!apiConfig) throw new ValidationError('Petición inválida: falta «apiConfig».')
+    return {
+      apiConfig,
+      recipeId: i.recipeId === undefined ? undefined : requireUuid(i.recipeId, 'recipeId'),
+    }
+  })
+  .handler(async ({ data }): Promise<Result<ApiProbeResult>> => {
+    const s = await import('./session')
+    const user = await s.requireUser()
+    if (!user) return s.AUTH_ERROR
+    const config = (await resolveApiCredentials(user.id, data.apiConfig, data.recipeId)) ?? data.apiConfig
+
+    try {
+      let token: string | null = null
+      if (config.authUrl) {
+        token = tokenFrom(config, await apiLoginJson(config))
+        // No token → tell the dialog to ask for a manual token path; can't GET.
+        if (!token) return { ok: true, data: { tokenFound: false, recordArrays: [] } }
+      }
+      const json = await apiDataJson(config, token)
+      const recordArrays = findRecordArrays(json).map((a) => {
+        const arr = getByPath(json, a.path)
+        const columns = Array.isArray(arr) ? extractColumns(arr.slice(0, PROBE_SAMPLE)) : []
+        return { path: a.path, count: a.count, columns }
+      })
+      return { ok: true, data: { tokenFound: true, recordArrays } }
+    } catch (err) {
+      if (err instanceof DataSourceError) return { ok: false, error: err.message, hint: err.hint }
+      return { ok: false, error: 'No se pudo probar la API. Revisa las direcciones e inténtalo de nuevo.' }
     }
   })
 

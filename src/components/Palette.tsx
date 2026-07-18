@@ -94,11 +94,13 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
                   e.dataTransfer.effectAllowed = 'copy'
                 }}
                 onClick={() => canvas.current?.insertField(col)}
-                title="Arrastra al documento o haz clic para insertarlo donde está el cursor"
-                className="inline-flex cursor-grab items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary hover:bg-primary/15 active:cursor-grabbing"
+                title={`${col} — arrastra al documento o haz clic para insertarlo`}
+                className="inline-flex max-w-full cursor-grab items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-left text-sm font-medium text-primary hover:bg-primary/15 active:cursor-grabbing"
               >
-                <GripVertical className="h-3 w-3 opacity-50" />
-                {col}
+                <GripVertical className="h-3 w-3 shrink-0 opacity-50" />
+                {/* Long dotted API paths (financial_estimation.payment_conditions)
+                    have no spaces: let them wrap instead of clipping at the edge. */}
+                <span className="min-w-0 break-all">{col}</span>
               </button>
             ))}
           </div>
