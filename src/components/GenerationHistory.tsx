@@ -30,6 +30,7 @@ const ROUTE_LABEL: Record<GenerationRunSummary['route'], string> = {
 const KIND_LABEL: Record<string, string> = {
   google_sheet: 'Google Sheets',
   api_endpoint: 'API',
+  manual_form: 'Formulario manual',
 }
 
 /**

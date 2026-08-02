@@ -7,6 +7,7 @@ import {
   FileStack,
   FileText,
   FolderOpen,
+  FormInput,
   MoreVertical,
   Pencil,
   Search,
@@ -259,6 +260,13 @@ export function HomeScreen() {
                     </p>
                   </div>
                   <button
+                    onClick={() => void navigate({ to: '/form/$recipeId', params: { recipeId: s.id } })}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-primary px-2 py-1.5 text-xs font-semibold text-white outline-none hover:bg-primary-active focus-visible:ring-2 focus-visible:ring-primary"
+                    aria-label={`Rellenar la plantilla ${s.name}`}
+                  >
+                    <FormInput className="h-3.5 w-3.5" /> Rellenar
+                  </button>
+                  <button
                     onClick={() => setMenuFor(s)}
                     aria-label={`Opciones de la plantilla ${s.name}`}
                     className="rounded-lg p-1.5 text-ink-faint outline-none hover:bg-black/5 hover:text-ink-secondary focus-visible:ring-2 focus-visible:ring-primary"
@@ -281,6 +289,10 @@ export function HomeScreen() {
           onOpen={() => {
             setMenuFor(null)
             void openRecipe(menuFor.id)
+          }}
+          onForm={() => {
+            setMenuFor(null)
+            void navigate({ to: '/form/$recipeId', params: { recipeId: menuFor.id } })
           }}
           onDuplicate={async () => {
             setMenuFor(null)
@@ -344,6 +356,7 @@ function CardMenu({
   summary,
   onClose,
   onOpen,
+  onForm,
   onDuplicate,
   onRename,
   onDelete,
@@ -351,6 +364,7 @@ function CardMenu({
   summary: RecipeSummary
   onClose: () => void
   onOpen: () => void
+  onForm: () => void
   onDuplicate: () => void
   onRename: () => void
   onDelete: () => void
@@ -370,6 +384,9 @@ function CardMenu({
         <p className="truncate px-3 py-1.5 text-xs font-semibold text-ink-muted">{summary.name}</p>
         <button onClick={onOpen} className={item} autoFocus>
           <FolderOpen className="h-4 w-4 text-primary" /> Abrir en el editor
+        </button>
+        <button onClick={onForm} className={item}>
+          <FormInput className="h-4 w-4 text-primary" /> Rellenar formulario
         </button>
         <button onClick={onDuplicate} className={item}>
           <Copy className="h-4 w-4 text-ink-muted" /> Duplicar

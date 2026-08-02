@@ -54,7 +54,7 @@ export interface Template {
 }
 
 /** Where the row data comes from. */
-export type DataSourceKind = 'google_sheet' | 'api_endpoint'
+export type DataSourceKind = 'google_sheet' | 'api_endpoint' | 'manual_form'
 
 /** The tabular data every source resolves to. */
 export interface DataSourceData {

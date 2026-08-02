@@ -33,6 +33,8 @@ export function createDataSource(
           columns: [],
         },
       )
+    case 'manual_form':
+      throw new Error('El formulario manual no se carga desde una URL.')
     default: {
       // Exhaustiveness guard: adding a new kind forces handling it here.
       const _never: never = kind

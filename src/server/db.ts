@@ -127,6 +127,16 @@ const MIGRATIONS: string[] = [
   // Configuración de la fuente API externa (endpoints, columnas elegidas y las
   // credenciales de login CIFRADAS en authBodyEnc). Nulo para recetas de hoja.
   `ALTER TABLE recipes ADD COLUMN api_config jsonb`,
+  // One current manual-form draft per user and saved template. Values are
+  // intentionally separate from the workspace draft and are never part of a
+  // recipe or generation audit record.
+  `CREATE TABLE manual_form_drafts (
+    owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipe_id uuid NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+    payload jsonb NOT NULL DEFAULT '{}',
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (owner_id, recipe_id)
+  )`,
 ]
 
 let client: postgres.Sql | null = null

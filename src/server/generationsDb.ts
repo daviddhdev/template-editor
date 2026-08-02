@@ -78,7 +78,7 @@ export const startGenerationFn = createServerFn({ method: 'POST' })
         i.recipeId === undefined || i.recipeId === null ? null : requireUuid(i.recipeId, 'recipeId'),
       templateName: requireString(i.templateName, 'templateName'),
       route: requireOneOf(i.route, ['native', 'google_html', 'local'] as const, 'route'),
-      dataKind: requireOneOf(i.dataKind, ['google_sheet', 'api_endpoint'] as const, 'dataKind'),
+      dataKind: requireOneOf(i.dataKind, ['google_sheet', 'api_endpoint', 'manual_form'] as const, 'dataKind'),
       dataUrl: requireString(i.dataUrl, 'dataUrl'),
       rowCount: requireInt(i.rowCount, 'rowCount'),
       formats: optionalFormats(i.formats) ?? ['pdf'],

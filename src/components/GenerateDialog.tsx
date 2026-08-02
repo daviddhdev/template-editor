@@ -86,6 +86,7 @@ export function GenerateDialog({
   google,
   warnings = [],
   batchLabel = '',
+  generationContext,
   onClose,
 }: {
   jobs: PdfJob[]
@@ -98,6 +99,14 @@ export function GenerateDialog({
   warnings?: string[]
   /** Template title, used to name the Drive batch folder. */
   batchLabel?: string
+  /** Overrides workspace metadata for isolated flows such as manual forms. */
+  generationContext?: {
+    recipeId: string | null
+    templateName: string
+    dataKind: string
+    dataUrl: string
+    outputFolderUrl?: string
+  }
   onClose: () => void
 }) {
   const [docs, setDocs] = useState<DocProgress[] | null>(null)
@@ -106,8 +115,15 @@ export function GenerateDialog({
   // Output folder is per template (saved with the recipe); the user pastes its
   // Drive URL. A template with a folder configured uploads by default.
   // savedRecipe/dataKind/dataUrl feed the generation audit log.
-  const { outputFolderUrl, setOutputFolderUrl, savedRecipe, dataKind, dataUrl } =
-    useWorkspace()
+  const workspace = useWorkspace()
+  const { outputFolderUrl: workspaceFolder, setOutputFolderUrl, savedRecipe, dataKind: workspaceKind, dataUrl: workspaceUrl } = workspace
+  const [manualFolder, setManualFolder] = useState(generationContext?.outputFolderUrl ?? workspaceFolder)
+  const outputFolderUrl = generationContext ? manualFolder : workspaceFolder
+  const setFolderUrl = generationContext ? setManualFolder : setOutputFolderUrl
+  const auditRecipeId = generationContext?.recipeId ?? savedRecipe?.id ?? null
+  const auditTemplateName = generationContext?.templateName ?? savedRecipe?.name ?? (batchLabel || 'Sin nombre')
+  const auditDataKind = generationContext?.dataKind ?? workspaceKind
+  const auditDataUrl = generationContext?.dataUrl ?? workspaceUrl
   const canWrite = google?.canWrite ?? false
   const [uploadToDrive, setUploadToDrive] = useState(
     () => outputFolderUrl.trim() !== '' && canWrite,
@@ -337,11 +353,11 @@ export function GenerateDialog({
       // Open the audit row for the new batch ("Continuar" keeps the same one).
       runIdRef.current = startGenerationFn({
         data: {
-          recipeId: savedRecipe?.id ?? null,
-          templateName: savedRecipe?.name ?? (batchLabel || 'Sin nombre'),
+          recipeId: auditRecipeId,
+          templateName: auditTemplateName,
           route: viaNative ? 'native' : viaGoogle ? 'google_html' : 'local',
-          dataKind,
-          dataUrl,
+          dataKind: auditDataKind,
+          dataUrl: auditDataUrl,
           rowCount: activeUnits.length,
           formats: withDocx && viaGoogle ? ['pdf', 'docx'] : ['pdf'],
           docNames: activeUnits.map((u) => u.name),
@@ -577,7 +593,7 @@ export function GenerateDialog({
                         <input
                           type="text"
                           value={outputFolderUrl}
-                          onChange={(e) => setOutputFolderUrl(e.target.value)}
+                          onChange={(e) => setFolderUrl(e.target.value)}
                           placeholder="https://drive.google.com/drive/folders/…"
                           className="min-w-0 flex-1 rounded-md border border-input-border bg-surface px-2.5 py-1.5 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           aria-label="URL de la carpeta de Drive de salida"
@@ -588,7 +604,7 @@ export function GenerateDialog({
                           size="sm"
                           label="Elegir la carpeta en Drive"
                           onPicked={(f) =>
-                            setOutputFolderUrl(`https://drive.google.com/drive/folders/${f.id}`)
+                            setFolderUrl(`https://drive.google.com/drive/folders/${f.id}`)
                           }
                         />
                       </div>
@@ -598,6 +614,7 @@ export function GenerateDialog({
                         </p>
                       ) : (
                         <p className="text-xs text-ink-muted">
+                          {generationContext ? 'Solo para esta generación; no cambia la plantilla.' : null}
                           Carpeta de esta plantilla (se guarda con ella). Cada generación crea una
                           subcarpeta con la fecha.
                         </p>

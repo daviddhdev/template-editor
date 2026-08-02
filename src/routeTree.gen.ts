@@ -14,6 +14,7 @@ import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as AuthedIndexRouteImport } from './routes/_authed.index'
 import { Route as OauthCallbackRouteImport } from './routes/oauth.callback'
 import { Route as AuthedEditorRouteImport } from './routes/_authed.editor'
+import { Route as AuthedFormRecipeIdRouteImport } from './routes/_authed.form.$recipeId'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -39,18 +40,25 @@ const AuthedEditorRoute = AuthedEditorRouteImport.update({
   path: '/editor',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedFormRecipeIdRoute = AuthedFormRecipeIdRouteImport.update({
+  id: '/form/$recipeId',
+  path: '/form/$recipeId',
+  getParentRoute: () => AuthedRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthedIndexRoute
   '/login': typeof LoginRoute
   '/editor': typeof AuthedEditorRoute
   '/oauth/callback': typeof OauthCallbackRoute
+  '/form/$recipeId': typeof AuthedFormRecipeIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/editor': typeof AuthedEditorRoute
   '/oauth/callback': typeof OauthCallbackRoute
   '/': typeof AuthedIndexRoute
+  '/form/$recipeId': typeof AuthedFormRecipeIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -59,12 +67,13 @@ export interface FileRoutesById {
   '/_authed/editor': typeof AuthedEditorRoute
   '/oauth/callback': typeof OauthCallbackRoute
   '/_authed/': typeof AuthedIndexRoute
+  '/_authed/form/$recipeId': typeof AuthedFormRecipeIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/editor' | '/oauth/callback'
+  fullPaths: '/' | '/login' | '/editor' | '/oauth/callback' | '/form/$recipeId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/editor' | '/oauth/callback' | '/'
+  to: '/login' | '/editor' | '/oauth/callback' | '/' | '/form/$recipeId'
   id:
     | '__root__'
     | '/_authed'
@@ -72,6 +81,7 @@ export interface FileRouteTypes {
     | '/_authed/editor'
     | '/oauth/callback'
     | '/_authed/'
+    | '/_authed/form/$recipeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -117,17 +127,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedEditorRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/form/$recipeId': {
+      id: '/_authed/form/$recipeId'
+      path: '/form/$recipeId'
+      fullPath: '/form/$recipeId'
+      preLoaderRoute: typeof AuthedFormRecipeIdRouteImport
+      parentRoute: typeof AuthedRoute
+    }
   }
 }
 
 interface AuthedRouteChildren {
   AuthedEditorRoute: typeof AuthedEditorRoute
   AuthedIndexRoute: typeof AuthedIndexRoute
+  AuthedFormRecipeIdRoute: typeof AuthedFormRecipeIdRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedEditorRoute: AuthedEditorRoute,
   AuthedIndexRoute: AuthedIndexRoute,
+  AuthedFormRecipeIdRoute: AuthedFormRecipeIdRoute,
 }
 
 const AuthedRouteWithChildren =
