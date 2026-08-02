@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CircleCheck, FileStack, Home, RotateCcw, Save } from 'lucide-react'
+import { Check, CircleCheck, FileStack, History, Home, RotateCcw, Save } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useWorkspace } from '../state/workspaceStore'
 import type { GenerationPlan } from '../types'
@@ -17,7 +17,9 @@ import { GoogleConnect } from './GoogleConnect'
 import { PreviewFrame } from './PreviewFrame'
 import { NativePreviewFrame } from './NativePreviewFrame'
 import { SaveRecipeDialog } from './SaveRecipeDialog'
+import { VersionHistoryDialog } from './VersionHistoryDialog'
 import { ConfirmDialog, Toast } from './ui'
+import { formatIssuesNotice, loadDataIntoWorkspace, missingColumnsNotice } from '../lib/loadData'
 
 /**
  * The single-screen workspace: top bar (sources, grouping, preview, generate),
@@ -42,6 +44,7 @@ export function Workspace() {
     clearNotice,
     notify,
     reset,
+    savedRecipe,
   } = useWorkspace()
 
   const canvasRef = useRef<DocCanvasHandle>(null)
@@ -49,6 +52,7 @@ export function Workspace() {
   const [previewIndex, setPreviewIndex] = useState(0)
   const [confirmReset, setConfirmReset] = useState(false)
   const [saveOpen, setSaveOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   // Ctrl+Z / Ctrl+Y anywhere in the app (the iframe handles its own copy).
   // Skipped inside form fields, where native text undo must keep working.
@@ -219,6 +223,15 @@ export function Workspace() {
           >
             <Save className="h-3.5 w-3.5" /> Guardar plantilla
           </button>
+          {savedRecipe ? (
+            <button
+              onClick={() => setHistoryOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3.5 py-1.5 text-sm font-medium text-ink-secondary shadow-e1 outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
+              title="Ver y restaurar versiones de esta plantilla"
+            >
+              <History className="h-3.5 w-3.5" /> Versiones
+            </button>
+          ) : null}
           <GoogleConnect status={google} onChanged={refreshGoogle} />
         </div>
       </header>
@@ -342,6 +355,30 @@ export function Workspace() {
       ) : null}
 
       {saveOpen ? <SaveRecipeDialog onClose={() => setSaveOpen(false)} /> : null}
+
+      {historyOpen && savedRecipe ? (
+        <VersionHistoryDialog
+          recipeId={savedRecipe.id}
+          recipeName={savedRecipe.name}
+          onClose={() => setHistoryOpen(false)}
+          onRestored={async (recipe, sourceVersion) => {
+            useWorkspace.getState().loadRecipe(recipe)
+            if (recipe.dataUrl.trim()) {
+              const dataRes = await loadDataIntoWorkspace(recipe.dataKind, recipe.dataUrl.trim())
+              if (dataRes.ok) {
+                notify(
+                  `Plantilla lista: ${dataRes.rows} filas de datos.` +
+                    missingColumnsNotice(dataRes.missingColumns) +
+                    formatIssuesNotice(dataRes.formatIssues),
+                )
+              } else {
+                notify(`Plantilla restaurada, pero los datos no: ${dataRes.error}`)
+              }
+            }
+            notify(`v${sourceVersion} restaurada como v${recipe.currentVersion}.`)
+          }}
+        />
+      ) : null}
 
       <Toast text={notice} token={noticeToken} onDismiss={clearNotice} />
     </div>

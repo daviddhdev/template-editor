@@ -232,6 +232,8 @@ export interface Recipe {
   name: string
   /** ISO date of the save (shown so stale templates are recognisable). */
   savedAt: string
+  /** Monotonic version of the current saved snapshot. */
+  currentVersion: number
   templateUrl: string
   editorHtml: string
   editorCss: string

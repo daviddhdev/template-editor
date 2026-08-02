@@ -8,6 +8,7 @@ import {
   FileText,
   FolderOpen,
   FormInput,
+  History as HistoryIcon,
   MoreVertical,
   Pencil,
   Search,
@@ -26,6 +27,7 @@ import { formatIssuesNotice, loadDataIntoWorkspace, missingColumnsNotice } from 
 import { authGuard } from '../lib/authRedirect'
 import { googleStatusFn, type GoogleStatus } from '../server/google'
 import { GenerationHistory } from './GenerationHistory'
+import { VersionHistoryDialog } from './VersionHistoryDialog'
 import { GoogleConnect } from './GoogleConnect'
 import { Button, ConfirmDialog, ErrorNote, Spinner, TextInput, Toast, useDialogChrome } from './ui'
 
@@ -57,6 +59,7 @@ export function HomeScreen() {
   const [menuFor, setMenuFor] = useState<RecipeSummary | null>(null)
   const [renaming, setRenaming] = useState<RecipeSummary | null>(null)
   const [deleting, setDeleting] = useState<RecipeSummary | null>(null)
+  const [historyFor, setHistoryFor] = useState<RecipeSummary | null>(null)
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -126,6 +129,23 @@ export function HomeScreen() {
       }
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function activateRestoredRecipe(recipe: import('../types').Recipe) {
+    useWorkspace.getState().loadRecipe(recipe)
+    void navigate({ to: '/editor' })
+    if (!recipe.dataUrl.trim()) return
+    const dataRes = await loadDataIntoWorkspace(recipe.dataKind, recipe.dataUrl.trim())
+    if (dataRes.ok) {
+      const tab = dataRes.multiTab && dataRes.tabTitle ? ` (pestaña «${dataRes.tabTitle}»)` : ''
+      notify(
+        `Plantilla lista: ${dataRes.rows} filas de datos${tab}.` +
+          missingColumnsNotice(dataRes.missingColumns) +
+          formatIssuesNotice(dataRes.formatIssues),
+      )
+    } else {
+      notify(`Plantilla abierta, pero los datos no: ${dataRes.error}`)
     }
   }
 
@@ -256,7 +276,7 @@ export function HomeScreen() {
                       {s.name}
                     </p>
                     <p className="text-xs text-ink-faint">
-                      Actualizada el {dateFmt.format(new Date(s.updatedAt))}
+                      v{s.currentVersion} · Actualizada el {dateFmt.format(new Date(s.updatedAt))}
                     </p>
                   </div>
                   <button
@@ -294,6 +314,10 @@ export function HomeScreen() {
             setMenuFor(null)
             void navigate({ to: '/form/$recipeId', params: { recipeId: menuFor.id } })
           }}
+          onHistory={() => {
+            setMenuFor(null)
+            setHistoryFor(menuFor)
+          }}
           onDuplicate={async () => {
             setMenuFor(null)
             const res = await duplicateRecipeFn({ data: { id: menuFor.id } }).catch(() => null)
@@ -308,6 +332,19 @@ export function HomeScreen() {
           onDelete={() => {
             setMenuFor(null)
             setDeleting(menuFor)
+          }}
+        />
+      ) : null}
+
+      {historyFor ? (
+        <VersionHistoryDialog
+          recipeId={historyFor.id}
+          recipeName={historyFor.name}
+          onClose={() => setHistoryFor(null)}
+          onRestored={async (recipe, sourceVersion) => {
+            await activateRestoredRecipe(recipe)
+            notify(`v${sourceVersion} restaurada como v${recipe.currentVersion}.`)
+            await refresh()
           }}
         />
       ) : null}
@@ -357,6 +394,7 @@ function CardMenu({
   onClose,
   onOpen,
   onForm,
+  onHistory,
   onDuplicate,
   onRename,
   onDelete,
@@ -365,6 +403,7 @@ function CardMenu({
   onClose: () => void
   onOpen: () => void
   onForm: () => void
+  onHistory: () => void
   onDuplicate: () => void
   onRename: () => void
   onDelete: () => void
@@ -387,6 +426,9 @@ function CardMenu({
         </button>
         <button onClick={onForm} className={item}>
           <FormInput className="h-4 w-4 text-primary" /> Rellenar formulario
+        </button>
+        <button onClick={onHistory} className={item}>
+          <HistoryIcon className="h-4 w-4 text-ink-muted" /> Historial de versiones
         </button>
         <button onClick={onDuplicate} className={item}>
           <Copy className="h-4 w-4 text-ink-muted" /> Duplicar

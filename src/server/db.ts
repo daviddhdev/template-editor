@@ -137,6 +137,44 @@ const MIGRATIONS: string[] = [
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (owner_id, recipe_id)
   )`,
+  // Immutable template history. The recipes row remains the denormalised
+  // current head for compatibility with existing readers; every successful
+  // save/restoration also appends the exact same state here.
+  `ALTER TABLE recipes ADD COLUMN current_version int NOT NULL DEFAULT 1 CHECK (current_version > 0);
+   CREATE TABLE recipe_versions (
+     recipe_id uuid NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+     version int NOT NULL CHECK (version > 0),
+     created_at timestamptz NOT NULL DEFAULT now(),
+     restored_from_version int,
+     template_url text NOT NULL DEFAULT '',
+     editor_html text NOT NULL,
+     editor_css text NOT NULL DEFAULT '',
+     editor_title text NOT NULL DEFAULT '',
+     editor_body_class text NOT NULL DEFAULT '',
+     data_kind text NOT NULL DEFAULT 'google_sheet',
+     data_url text NOT NULL DEFAULT '',
+     api_config jsonb,
+     mapping jsonb NOT NULL DEFAULT '{}',
+     group_config jsonb NOT NULL DEFAULT '{}',
+     rule_bindings jsonb NOT NULL DEFAULT '{}',
+     tag_formats jsonb NOT NULL DEFAULT '{}',
+     source_file jsonb,
+     output_folder_url text NOT NULL DEFAULT '',
+     thumbnail bytea,
+     PRIMARY KEY (recipe_id, version)
+   );
+   INSERT INTO recipe_versions (
+     recipe_id, version, created_at, template_url, editor_html, editor_css,
+     editor_title, editor_body_class, data_kind, data_url, api_config,
+     mapping, group_config, rule_bindings, tag_formats, source_file,
+     output_folder_url, thumbnail
+   )
+   SELECT id, 1, updated_at, template_url, editor_html, editor_css,
+     editor_title, editor_body_class, data_kind, data_url, api_config,
+     mapping, group_config, rule_bindings, tag_formats, source_file,
+     output_folder_url, thumbnail
+   FROM recipes;
+   CREATE INDEX recipe_versions_created_idx ON recipe_versions (recipe_id, version DESC);`,
 ]
 
 let client: postgres.Sql | null = null
