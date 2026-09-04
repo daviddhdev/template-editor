@@ -34,6 +34,25 @@ export const AUTH_ERROR = {
   code: 'AUTH' as const,
 }
 
+/**
+ * Local-only identity for the internal product demo. This is intentionally
+ * gated by both the development runtime and an explicit opt-in env var so it
+ * cannot weaken authentication in production. It lets the demo open the
+ * authenticated editor locally when Postgres/OAuth are unavailable. The demo
+ * harness intercepts generatePdfFn and renders PDFs in its own Chromium, so
+ * the capture does not exercise src/server/pdf.ts or its browser pool.
+ */
+const DEMO_USER: SessionUser = {
+  id: '00000000-0000-4000-8000-000000000001',
+  email: 'demo@local.invalid',
+}
+
+function demoUser(): SessionUser | null {
+  return process.env.NODE_ENV === 'development' && process.env.TTG_DEMO_MODE === '1'
+    ? DEMO_USER
+    : null
+}
+
 function secureCookie(): boolean {
   // x-forwarded-proto aware — works in dev http and behind a TLS proxy.
   return getRequestUrl().protocol === 'https:'
@@ -64,6 +83,8 @@ export async function destroySession(): Promise<void> {
 /** The logged-in user, or null. Renews the session (sliding 30 days) once
  * less than half its TTL remains. */
 export async function currentUser(): Promise<SessionUser | null> {
+  const localDemo = demoUser()
+  if (localDemo) return localDemo
   const token = getCookie(SESSION_COOKIE)
   if (!token) return null
   const sql = await getSql()
