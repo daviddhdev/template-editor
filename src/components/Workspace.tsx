@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CircleCheck, FileStack, History, Home, RotateCcw, Save } from 'lucide-react'
+import { Check, CircleCheck, History, Home, RotateCcw, Save } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useWorkspace } from '../state/workspaceStore'
 import type { GenerationPlan } from '../types'
@@ -20,6 +20,7 @@ import { SaveRecipeDialog } from './SaveRecipeDialog'
 import { VersionHistoryDialog } from './VersionHistoryDialog'
 import { ConfirmDialog, Toast } from './ui'
 import { formatIssuesNotice, loadDataIntoWorkspace, missingColumnsNotice } from '../lib/loadData'
+import { BrandLockup } from './Brand'
 
 /**
  * The single-screen workspace: top bar (sources, grouping, preview, generate),
@@ -212,8 +213,7 @@ export function Workspace() {
         >
           <Home className="h-3.5 w-3.5" /> Inicio
         </Link>
-        <FileStack className="h-5 w-5 text-accent-sky" />
-        <h1 className="text-lg font-bold tracking-tight text-ink">Generador de documentos</h1>
+        <BrandLockup variant="compact" />
         <div className="ml-auto flex items-center gap-3">
           <button
             onClick={() => setSaveOpen(true)}

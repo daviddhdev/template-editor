@@ -1,30 +1,38 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
-/* Notion-style design system (opción 2a): papel cálido, un único azul para la
-   acción, tinta casi negra y acentos decorativos solo en los "stickers". */
+/* Talos design system: warm paper surfaces, petrol actions, and restrained
+   bronze/gold details. Document content keeps its own imported typography. */
 @theme {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  --color-primary: #0075de;
-  --color-primary-active: #005bab;
+  --color-primary: #0F5C5E;
+  --color-primary-active: #0B4749;
+  --color-bronze: #B85C38;
+  --color-bronze-soft: #F4DED2;
+  --color-gold: #D8A85D;
 
-  --color-surface: #ffffff;
-  --color-canvas-soft: #f6f5f4;
-  --color-hairline: #e6e6e6;
-  --color-input-border: #dddddd;
+  --color-canvas-soft: #F5F1E8;
+  --color-canvas-shell: #ECE8DE;
+  --color-surface: #FFFDF9;
+  --color-hairline: #DED7CC;
+  --color-input-border: #CEC5B8;
 
-  --color-ink: rgba(0, 0, 0, 0.95);
-  --color-ink-secondary: #31302e;
-  --color-ink-muted: #615d59;
-  --color-ink-faint: #a39e98;
+  --color-ink: #182827;
+  --color-ink-secondary: #344543;
+  --color-ink-muted: #687572;
+  --color-ink-faint: #939B98;
 
-  --color-accent-sky: #62aef0;
-  --color-accent-purple: #d6b6f6;
-  --color-accent-pink: #ff64c8;
-  --color-accent-orange: #dd5b00;
-  --color-accent-teal: #2a9d99;
-  --color-accent-green: #1aae39;
+  /* Compatibility names used by existing semantic UI states. */
+  --color-accent-sky: #0F5C5E;
+  --color-accent-purple: #D8A85D;
+  --color-accent-pink: #B85C38;
+  --color-accent-orange: #8D3F24;
+  --color-accent-teal: #287777;
+  --color-accent-green: #2F7D5C;
+  --color-success: #2F7D5C;
+  --color-warning: #8D3F24;
+  --color-danger: #B42318;
 
   --shadow-e1: 0 1px 2px rgba(15, 15, 15, 0.04), 0 1px 4px rgba(15, 15, 15, 0.05);
   --shadow-e2: 0 2px 8px rgba(15, 15, 15, 0.06), 0 9px 24px rgba(15, 15, 15, 0.1);
@@ -52,7 +60,7 @@ body {
 /* Field "chip" — the visual token for {{campo}} inside the template editor. */
 .ttg-chip {
   display: inline;
-  background: rgba(0, 117, 222, 0.1);
+  background: rgba(15, 92, 94, 0.1);
   color: var(--color-primary);
   border-radius: 4px;
   padding: 1px 6px;

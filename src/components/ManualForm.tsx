@@ -15,6 +15,7 @@ import { GenerateDialog } from './GenerateDialog'
 import { NativePreviewFrame } from './NativePreviewFrame'
 import { PreviewFrame } from './PreviewFrame'
 import { Button, ConfirmDialog, ErrorNote, Spinner, Toast } from './ui'
+import { BrandLockup } from './Brand'
 
 type LoadState = { status: 'loading' } | { status: 'ready'; recipe: Recipe } | { status: 'error'; error: string }
 
@@ -120,8 +121,10 @@ function ManualFormReady({
 
   return (
     <div className="mx-auto flex min-h-screen max-w-[110rem] flex-col gap-4 px-5 py-4">
-      <header className="flex items-center gap-3">
+      <header className="flex flex-wrap items-center gap-3">
         <button onClick={onBack} className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-sm font-medium text-ink-secondary shadow-e1 hover:text-primary"><ArrowLeft className="h-3.5 w-3.5" /> Plantillas</button>
+        <BrandLockup variant="compact" />
+        <span aria-hidden className="hidden h-6 w-px bg-hairline sm:block" />
         <FileText className="h-5 w-5 text-accent-sky" />
         <div className="min-w-0"><h1 className="truncate text-lg font-bold text-ink">{recipe.name}</h1><p className="text-xs text-ink-muted">Rellenar formulario</p></div>
         <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-ink-muted"><Sparkles className="h-3.5 w-3.5 text-accent-orange" /> Un documento</span>

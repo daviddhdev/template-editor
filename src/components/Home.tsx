@@ -4,7 +4,6 @@ import {
   ArrowRight,
   Copy,
   FilePlus2,
-  FileStack,
   FileText,
   FolderOpen,
   FormInput,
@@ -30,17 +29,18 @@ import { GenerationHistory } from './GenerationHistory'
 import { VersionHistoryDialog } from './VersionHistoryDialog'
 import { GoogleConnect } from './GoogleConnect'
 import { Button, ConfirmDialog, ErrorNote, Spinner, TextInput, Toast, useDialogChrome } from './ui'
+import { BrandLockup } from './Brand'
 
 const dateFmt = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
 
 /** Decorative-only "sticker" colours for the card icons, cycled per card. */
 const CARD_ACCENTS = [
-  'text-accent-orange',
-  'text-accent-teal',
-  'text-accent-pink',
-  'text-accent-sky',
-  'text-accent-purple',
-  'text-accent-green',
+  'text-primary',
+  'text-bronze',
+  'text-gold',
+  'text-primary',
+  'text-bronze',
+  'text-gold',
 ]
 
 /**
@@ -157,16 +157,9 @@ export function HomeScreen() {
   return (
     <div className="mx-auto flex min-h-screen max-w-[90rem] flex-col gap-6 px-10 py-8">
       <header className="flex items-center gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent-sky text-white shadow-e1">
-            <FileStack className="h-6 w-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-ink">
-              Generador de documentos
-            </h1>
-            <p className="text-sm text-ink-muted">Tus plantillas y tu trabajo reciente</p>
-          </div>
+        <div>
+          <BrandLockup variant="compact" />
+          <p className="mt-1 text-sm text-ink-muted">Tus plantillas y tu trabajo reciente</p>
         </div>
         <div className="ml-auto flex items-center gap-3">
           <div className="relative">

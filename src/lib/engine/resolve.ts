@@ -96,11 +96,11 @@ export function resolveGroupBody(
 function frameStyles(): string {
   return `
     /* SCREEN ONLY (the preview iframe): show the document as a centred page
-       on a grey canvas, like the editor. Print — the actual PDF — is
+       on a warm canvas, like the editor. Print — the actual PDF — is
        untouched: server/pdf.ts overrides margins itself, and Google's
        importer ignores screen media rules. */
     @media screen {
-      html { background: #e5e7eb; }
+      html { background: #ECE8DE; }
       body {
         margin: 16px auto !important;
         box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 12px 30px rgba(0,0,0,.12);

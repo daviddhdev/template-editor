@@ -1,6 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 import { ErrorNote } from "../components/ui";
+import { BrandLockup } from "../components/Brand";
 import { meFn } from "../server/auth";
 import { googleAuthUrlFn } from "../server/google";
 
@@ -53,22 +54,18 @@ function LoginScreen() {
     }
   }
 
-  // Diseño 3a: tarjeta centrada en papel cálido, sin iconos ni decoración,
-  // un único botón azul; wordmark arriba y nota de soporte abajo.
   return (
     <main className="relative flex min-h-screen items-center justify-center bg-canvas-soft px-6 py-24">
-      <div className="absolute inset-x-0 top-[34px] text-center text-sm font-semibold tracking-[-0.1px] text-ink-secondary">
-        Generador de documentos
-      </div>
-
-      <div className="w-full max-w-[452px] rounded-2xl border border-hairline bg-surface px-13 pt-13 pb-11 text-center shadow-e2">
+      <div className="w-full max-w-[452px] rounded-2xl border border-hairline bg-surface px-8 py-10 text-center shadow-e2 sm:px-13">
+        <BrandLockup variant="full" className="mx-auto justify-center" />
         <h1 className="text-[32px] font-bold leading-[1.12] tracking-[-1px] text-ink">
           Entra en tu cuenta
         </h1>
         <p className="mt-3.5 text-base leading-normal text-ink-muted">
-          Usa la cuenta de Google del trabajo para acceder a tus plantillas y
-          generar documentos.
+          Usa la cuenta de Google del trabajo para acceder a tus plantillas,
+          datos y documentos en Talos.
         </p>
+        <p className="mt-3 text-sm font-semibold text-primary">Tus datos, hechos documento.</p>
 
         <button
           onClick={login}

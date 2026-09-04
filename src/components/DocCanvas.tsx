@@ -1113,7 +1113,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       <iframe
         ref={iframeRef}
         title="Editor de plantilla"
-        className="h-full w-full rounded-lg border border-hairline bg-[#eceae7]"
+        className="h-full w-full rounded-lg border border-hairline bg-canvas-shell"
       />
 
       {showBlankHelp ? (

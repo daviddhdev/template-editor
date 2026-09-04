@@ -173,16 +173,16 @@ const EDITOR_BASE_CSS = `body{font-family:Arial,Helvetica,sans-serif;color:#111;
 
 /** Editor-only chrome: a grey canvas, a page shadow, and the field chip. */
 const EDITOR_CHROME_CSS = `
-  html{background:#eceae7;}
+  html{background:#ECE8DE;}
   body{margin:24px auto !important;outline:none;box-shadow:0 2px 8px rgba(15,15,15,.06),0 9px 24px rgba(15,15,15,.1);}
   /* No font-weight of its own: the chip must INHERIT bold/italic applied to
      the text around it, or formatting a selection with a field would show
      everything bold except the field. */
-  .ttg-chip{display:inline;background:rgba(0,117,222,.1);color:inherit;border-radius:4px;padding:1px 6px;margin:0 1px;white-space:nowrap;cursor:pointer;outline:1px solid rgba(0,117,222,.35);}
+  .ttg-chip{display:inline;background:rgba(15,92,94,.1);color:inherit;border-radius:4px;padding:1px 6px;margin:0 1px;white-space:nowrap;cursor:pointer;outline:1px solid rgba(15,92,94,.35);}
   /* Field whose name matches no data column yet: needs a click to bind. */
-  .ttg-chip.ttg-unbound{background:rgba(221,91,0,.08);outline:1px dashed #dd5b00;}
+  .ttg-chip.ttg-unbound{background:rgba(184,92,56,.1);outline:1px dashed #B85C38;}
   /* Field bound to a rule (anchored conditional / repeatable section). */
-  .ttg-chip.ttg-rulebound{background:rgba(42,157,153,.12);outline:1px solid rgba(42,157,153,.5);}
+  .ttg-chip.ttg-rulebound{background:rgba(15,92,94,.12);outline:1px solid rgba(15,92,94,.5);}
   /* Section repeated once per row of the group. The label sits IN FLOW (same
      pattern as .ttg-cond::before): an absolutely-positioned pill overflowed
      narrow sections and overlapped the first content line.
@@ -191,14 +191,14 @@ const EDITOR_CHROME_CSS = `
      element itself — the ::before resets below (text-indent, text-align,
      margin-left) keep the label in place inside those too, where the
      paragraph's own negative text-indent pushed it out of the box. */
-  [data-ttg-repeat="true"]{border-left:3px solid #2a9d99;padding:6px 8px 8px !important;background:rgba(42,157,153,.06);border-radius:0 6px 6px 0;}
-  [data-ttg-repeat="true"]::before{content:'se repite por cada fila';display:block;margin:0 0 4px;color:#1d6f6c;font:600 9px Inter,Arial,sans-serif;letter-spacing:.4px;text-transform:uppercase;text-indent:0;text-align:left;margin-left:0;}
+  [data-ttg-repeat="true"]{border-left:3px solid #287777;padding:6px 8px 8px !important;background:rgba(15,92,94,.06);border-radius:0 6px 6px 0;}
+  [data-ttg-repeat="true"]::before{content:'se repite por cada fila';display:block;margin:0 0 4px;color:#1D6F6C;font:600 9px Manrope,Arial,sans-serif;letter-spacing:.4px;text-transform:uppercase;text-indent:0;text-align:left;margin-left:0;}
   /* Inline conditional block: shows a readable summary, click to edit. */
-  .ttg-cond{display:block;margin:8px 0;padding:8px 12px;border:1px solid rgba(221,91,0,.45);border-radius:8px;background:rgba(221,91,0,.05);color:#793400;font:500 12px/1.6 Inter,Arial,sans-serif;cursor:pointer;}
-  .ttg-cond::before{content:'texto condicional — clic para editar';display:block;margin-bottom:2px;color:#dd5b00;font:600 9px Inter,Arial,sans-serif;letter-spacing:.4px;text-transform:uppercase;}
+  .ttg-cond{display:block;margin:8px 0;padding:8px 12px;border:1px solid rgba(141,63,36,.45);border-radius:8px;background:rgba(184,92,56,.05);color:#793400;font:500 12px/1.6 Manrope,Arial,sans-serif;cursor:pointer;}
+  .ttg-cond::before{content:'texto condicional — clic para editar';display:block;margin-bottom:2px;color:#8D3F24;font:600 9px Manrope,Arial,sans-serif;letter-spacing:.4px;text-transform:uppercase;}
   .ttg-cond .ttg-cond-line{display:block;}
   /* Insertion caret shown while dragging a column over the document. */
-  .ttg-drop-caret{position:absolute;width:2px;border-radius:1px;background:#0075de;pointer-events:none;display:none;z-index:9999;}
+  .ttg-drop-caret{position:absolute;width:2px;border-radius:1px;background:#0F5C5E;pointer-events:none;display:none;z-index:9999;}
 `;
 
 /**
