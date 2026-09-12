@@ -1,16 +1,3 @@
-/**
- * Shared Chromium instance (SERVER ONLY — import this module DYNAMICALLY from
- * inside server-function handlers; a static import from a file the client
- * also imports would drag playwright into the browser bundle and break the
- * build). Closed after a short idle: the generate dialog sends one document
- * per request for live progress, and launching a fresh browser per request
- * would add ~1s to every document of a batch.
- *
- * Reference-counted: the idle close only arms once the LAST concurrent user
- * releases (a timer armed while another request still rendered used to be
- * able to kill the browser mid-render). Used by pdf.ts and by the recipe
- * thumbnail in recipesDb.ts.
- */
 
 let sharedBrowser: Promise<import('playwright').Browser> | null = null
 let idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -31,7 +18,6 @@ export async function acquireBrowser(): Promise<import('playwright').Browser> {
       if (!browser.isConnected()) throw new Error('browser disconnected')
       return browser
     } catch {
-      // Launch failed or the browser died between requests — relaunch once.
       sharedBrowser = import('playwright').then(({ chromium }) => chromium.launch())
       return await sharedBrowser
     }

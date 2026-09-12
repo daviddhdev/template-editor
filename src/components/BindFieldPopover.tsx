@@ -3,7 +3,6 @@ import type { FormatId } from '../types'
 import { FIELD_FORMATS } from '../lib/engine/format'
 import { Button, useDialogChrome } from './ui'
 
-/** Popover to bind a clicked field chip to a data column. */
 export function BindFieldPopover({
   tag,
   columns,
@@ -19,20 +18,13 @@ export function BindFieldPopover({
 }: {
   tag: string
   columns: string[]
-  /** Column the field currently resolves to (explicit or by name), if any. */
   current: string | null
-  /** True when `current` comes from the name match, not an explicit choice. */
   implicit: boolean
-  /** Display format chosen for this field (null = as-is). */
   format: FormatId | null
   onAssign: (column: string) => void
-  /** Clear the explicit binding (shown only when there is one). */
   onUnassign: () => void
-  /** Choose how the value is written (null = as-is). */
   onFormat: (format: FormatId | null) => void
-  /** Bind to a rule instead: false = conditional text, true = repeat per row. */
   onRule: (perRow: boolean) => void
-  /** Delete the clicked chip from the document. */
   onRemove: () => void
   onClose: () => void
 }) {

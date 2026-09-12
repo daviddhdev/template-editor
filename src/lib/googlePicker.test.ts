@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { canonicalPickedUrl, type PickedFile } from './googlePicker'
 import { extractGoogleFolderId, extractGoogleId } from './url'
 
-// The picker plugs into the same load path as a pasted link, so every
-// canonical URL must round-trip through the URL parsers the app already uses.
 describe('canonicalPickedUrl', () => {
   const id = '1AbCdEfGhIjKlMnOpQrStUvWxYz012345'
   const file = (mimeType: string): PickedFile => ({ id, name: 'Archivo', mimeType })

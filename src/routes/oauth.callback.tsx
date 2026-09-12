@@ -4,13 +4,6 @@ import { googleExchangeFn } from '../server/google'
 import { LOGIN_REDIRECT_KEY } from './login'
 import { ErrorNote, Spinner } from '../components/ui'
 
-/**
- * Where Google redirects back after the consent screen. Exchanges the
- * authorization code on the server — which completes the LOGIN (user upsert +
- * session cookie) — then returns to where /login was headed. Using a normal
- * client route (instead of a server route) keeps the OAuth flow independent
- * of the server-route API.
- */
 export const Route = createFileRoute('/oauth/callback')({
   validateSearch: (s: Record<string, unknown>) => ({
     code: typeof s.code === 'string' ? s.code : '',

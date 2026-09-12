@@ -10,7 +10,6 @@ export interface ManualField {
   formats: string[]
 }
 
-/** The unique data keys needed to resolve a saved template manually. */
 export function manualFields(
   template: Template,
   mapping: TagMapping,
@@ -27,8 +26,6 @@ export function manualFields(
   }
 
   for (const tag of allPlanTags(template, rules)) {
-    // A tag anchored to a rule is resolved by the rule itself; its inner tags
-    // are visited below and become inputs through their column bindings.
     if (rules[tag]) continue
     add(mapping[tag] ?? tag, tag)
   }

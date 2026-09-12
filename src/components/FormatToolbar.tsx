@@ -24,7 +24,6 @@ export interface ToolbarTextStyle {
   colorHex: string
 }
 
-/** Friendly history labels for the formatting commands. */
 export const FORMAT_LABEL: Record<string, string> = {
   fontSizePt: 'Tamaño de fuente',
   foreColor: 'Color del texto',
@@ -37,7 +36,6 @@ export const FORMAT_LABEL: Record<string, string> = {
   justifyFull: 'Justificado',
 }
 
-/** Formatting commands, in toolbar order. `null` = visual separator. */
 const FORMAT_BUTTONS: ({ cmd: string; label: string; Icon: typeof Bold } | null)[] = [
   { cmd: 'bold', label: 'Negrita', Icon: Bold },
   { cmd: 'italic', label: 'Cursiva', Icon: Italic },
@@ -49,8 +47,6 @@ const FORMAT_BUTTONS: ({ cmd: string; label: string; Icon: typeof Bold } | null)
   { cmd: 'justifyFull', label: 'Justificar', Icon: AlignJustify },
 ]
 
-/** Bold/italic/underline + alignment over the latest editor/dialog selection,
- * plus undo/redo and the change-history panel. */
 export function FormatToolbar({
   fmt,
   textStyle,
@@ -199,7 +195,6 @@ export function FormatToolbar({
         b ? (
           <button
             key={b.cmd}
-            // preventDefault: keep the iframe selection alive on click.
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onCommand(b.cmd)}
             title={b.label}
@@ -289,13 +284,11 @@ export function FormatToolbar({
 
 const timeFmt = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' })
 
-/** Change history: newest first; click an entry to roll back to before it. */
 function HistoryPanel({ onClose }: { onClose: () => void }) {
   const dialogRef = useDialogChrome(onClose)
   const { history, undo, notify } = useWorkspace()
   const entries = [...history.past].reverse()
 
-  /** Roll back N steps (entry index 0 = most recent change). */
   const rollBack = (steps: number, label: string) => {
     for (let i = 0; i < steps; i++) undo()
     notify(`Documento devuelto a antes de: ${label}`)

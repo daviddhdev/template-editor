@@ -51,8 +51,6 @@ describe('CondEditor rich fields', () => {
     fireEvent.mouseUp(field)
     expect(selections.at(-1)?.element).toBe(field)
 
-    // This mirrors the top toolbar: execCommand mutates the active DOM and
-    // then calls sync so the dialog's local rule state follows it.
     field.innerHTML = '<p style="text-align:center"><b>Hola {{NOMBRE}}</b></p>'
     act(() => selections.at(-1)!.sync())
     fireEvent.click(screen.getByRole('button', { name: 'Guardar' }))

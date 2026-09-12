@@ -11,11 +11,6 @@ function pdfUrl(base64: string): string {
   return URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
 }
 
-/**
- * Faithful preview: materialise the original document, apply safe edits and
- * data, and show Google's PDF. If that transient generation fails, retain the
- * immediate HTML preview with a visible warning instead of a blank canvas.
- */
 export function NativePreviewFrame({
   sourceFileId,
   job,

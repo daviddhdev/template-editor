@@ -1,17 +1,10 @@
-/**
- * users table access (SERVER ONLY — import dynamically). One row per person;
- * it also holds their Google connection (refresh token + granted scopes),
- * which replaced the old global .google-oauth.json file.
- */
 
 import { getSql } from './db'
 
 export interface GoogleTokenRow {
   refreshToken: string | null
   accessToken: string | null
-  /** Epoch ms after which accessToken must be refreshed. */
   expiresAt: number | null
-  /** Space-separated scopes Google actually granted. */
   scopes: string
 }
 
@@ -22,8 +15,6 @@ export interface LoginTokens {
   scopes: string
 }
 
-/** Create-or-refresh the user on login. Every login carries a fresh consent
- * (prompt=consent), so the stored refresh token is always replaced. */
 export async function upsertUserOnLogin(
   email: string,
   tokens: LoginTokens,
@@ -60,7 +51,6 @@ export async function readGoogleTokens(userId: string): Promise<GoogleTokenRow |
   }
 }
 
-/** Persist a refreshed access token (the refresh token does not change). */
 export async function saveAccessToken(
   userId: string,
   accessToken: string,
@@ -71,8 +61,6 @@ export async function saveAccessToken(
     google_access_expires_at = ${new Date(expiresAt)} WHERE id = ${userId}`
 }
 
-/** The refresh token turned out dead (revoked/expired): forget the connection
- * so the UI offers "Reconectar" instead of retrying a doomed refresh. */
 export async function clearGoogleTokens(userId: string): Promise<void> {
   const sql = await getSql()
   await sql`UPDATE users SET google_refresh_token = NULL, google_access_token = NULL,

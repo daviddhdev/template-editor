@@ -33,16 +33,10 @@ import { FORMAT_LABEL, FormatToolbar, type ToolbarTextStyle } from './FormatTool
 import { MarginRuler } from './MarginRuler'
 import { Button, ConfirmDialog } from './ui'
 
-/** MIME type used to carry a column name through native drag & drop. */
 export const DRAG_MIME = 'text/ttg-column'
-/** MIME type used to drop a new inline conditional block. */
 export const COND_MIME = 'text/ttg-cond'
 
-/**
- * Vertical insertion marker shown while dragging over the document. Lives on
- * `documentElement`, NOT `<body>`, so persist() (which stores body.innerHTML)
- * never sees it.
- */
+// Keep the drag marker outside body.innerHTML so it is never persisted.
 function dropMarker(doc: Document): HTMLElement {
   let m = doc.getElementById('ttg-drop-caret')
   if (!m) {
@@ -59,9 +53,8 @@ function hideDropMarker(doc: Document): void {
   if (m) m.style.display = 'none'
 }
 
-/** Place the marker at a collapsed range's caret position. */
 function showDropMarker(doc: Document, r: Range): void {
-  // A collapsed range often reports no rect; probe one character around it.
+  // A collapsed range may have no rect; probe one character around it.
   let rect: DOMRect | undefined
   let x: number | undefined
   const probe = r.cloneRange()
@@ -99,19 +92,12 @@ function showDropMarker(doc: Document, r: Range): void {
   m.style.height = `${rect.height || 16}px`
 }
 
-/**
- * The chip immediately beside a collapsed caret (skipping the invisible
- * caret-anchor text nodes decorateFields puts after chips), or null.
- * Deleting around contenteditable=false elements is erratic in Chromium —
- * often a silent no-op — so chip deletion is handled explicitly (see the
- * keydown listener).
- */
+/** Chip beside the caret, if any; Chromium needs explicit chip deletion. */
 function chipBesideCaret(node: Node, offset: number, dir: 'back' | 'fwd'): HTMLElement | null {
   let probe: Node | null
   if (node.nodeType === Node.TEXT_NODE) {
     const data = (node as Text).data
     const rest = dir === 'back' ? data.slice(0, offset) : data.slice(offset)
-    // Only anchors (or nothing) between the caret and the node edge.
     if (rest.split(CARET_ANCHOR).join('') !== '') return null
     probe = dir === 'back' ? node.previousSibling : node.nextSibling
   } else {
@@ -127,7 +113,6 @@ function chipBesideCaret(node: Node, offset: number, dir: 'back' | 'fwd'): HTMLE
   return el.hasAttribute('data-ttg-field-style') ? el.querySelector<HTMLElement>(':scope > .ttg-chip') : null
 }
 
-/** Remove a chip together with the caret anchor that follows it. */
 function removeChip(chip: HTMLElement): void {
   const styleWrapper = chip.closest<HTMLElement>('[data-ttg-field-style]')
   const next = styleWrapper?.nextSibling ?? chip.nextSibling
@@ -139,11 +124,7 @@ function removeChip(chip: HTMLElement): void {
   if (styleWrapper && !styleWrapper.textContent) styleWrapper.remove()
 }
 
-/**
- * Range at a viewport point. Chromium/Safari expose caretRangeFromPoint;
- * Firefox only has caretPositionFromPoint — without this fallback, dropping
- * a column on the document silently did nothing there.
- */
+// Firefox exposes caretPositionFromPoint instead of caretRangeFromPoint.
 function rangeFromPoint(doc: Document, x: number, y: number): Range | null {
   if (typeof doc.caretRangeFromPoint === 'function') {
     return doc.caretRangeFromPoint(x, y)
@@ -164,10 +145,8 @@ function rangeFromPoint(doc: Document, x: number, y: number): Range | null {
   return r
 }
 
-/** The run that carries the visible font in Google exports, or the block. */
 function textStyleSource(el: HTMLElement): HTMLElement {
-  // The chip's blue colour/background are editor chrome; its parent is the
-  // original document run whose typography the generated rule must inherit.
+  // Chip styling is editor chrome; inherit typography from its source run.
   if (el.classList.contains('ttg-chip')) return el.parentElement ?? el
   const runs = Array.from(el.querySelectorAll<HTMLElement>('span[class], span[style]')).filter(
     (run) => !run.closest('.ttg-chip, .ttg-cond'),
@@ -251,7 +230,6 @@ function applyCapturedTextStyle(
   return changed
 }
 
-/** Nearby content, crossing repeat-wrapper boundaries and skipping chrome. */
 function adjacentContent(el: HTMLElement, direction: 'previous' | 'next'): HTMLElement | null {
   let candidate =
     direction === 'previous'
@@ -286,28 +264,13 @@ function nearbyTextStyle(el: HTMLElement): ConditionalTextStyle | undefined {
   )
 }
 
-/** Imperative surface the palette / panels use to act on the document. */
 export interface DocCanvasHandle {
-  /** Insert a field chip at the cursor (or at the end when no cursor). */
   insertField: (name: string) => void
-  /**
-   * Toggle "repeat once per row of the group". Single block at the cursor ->
-   * toggles its data-ttg-repeat; a selection spanning several blocks -> wraps
-   * them in one repeatable <div data-ttg-repeat>.
-   */
   toggleRepeat: () => void
-  /** Insert a new inline conditional after the cursor block and open its editor. */
   insertConditional: () => void
-  /** Open a new anchored conditional/repeat rule for an existing {{tag}}. */
   openRuleEditor: (tag: string) => void
 }
 
-/**
- * The editable document canvas: an iframe rendering the source document with
- * its ORIGINAL CSS untouched (fidelity), plus editing chrome — field chips,
- * repeat markers and inline conditional blocks — all persisted inside the
- * document HTML itself (data-* attributes / .ttg-cond elements).
- */
 export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(function DocCanvas(
   { className = '' },
   ref,
@@ -330,14 +293,8 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const savedRange = useRef<Range | null>(null)
-  /** Selection inside a conditional dialog; formatting commands prefer it
-   * over the saved iframe range until the dialog closes. */
   const richFormatTarget = useRef<RichTextSelection | null>(null)
-  /** Field-binding popover: which chip was clicked (element kept so the
-   * popover can also REMOVE the field from the document). */
   const [bindTag, setBindTag] = useState<{ tag: string; el: HTMLElement } | null>(null)
-  /** Inline-conditional editor: the .ttg-cond element being edited. */
-  /** Anchored rule being edited for a tag ({{tag}} bound to a rule). */
   const [bindingRule, setBindingRule] = useState<{
     tag: string
     rule: ConditionalRule
@@ -347,8 +304,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
   const [editingCond, setEditingCond] = useState<{ el: HTMLElement; rule: ConditionalRule } | null>(
     null,
   )
-  /** Start from scratch: a real A4 page (Google-like defaults) instead of an
-   * unstyled grey void — 595pt wide, 2.54 cm margins, Arial 11pt, white. */
   const startBlankDocument = useCallback(() => {
     useWorkspace.getState().loadRawDocument({
       title: 'Documento',
@@ -357,9 +312,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       bodyHtml: '<p><br></p>',
     })
   }, [])
-  /** "Repetir por fila" pressed while in per-row mode: offer to switch. */
   const [askGroupMode, setAskGroupMode] = useState(false)
-  /** Active inline formats at the caret, for toolbar button highlighting. */
   const [fmt, setFmt] = useState<Record<string, boolean>>({})
   const [toolbarTextStyle, setToolbarTextStyle] = useState<ToolbarTextStyle>({
     fontSizePt: 11,
@@ -370,7 +323,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
   const editorDoc = () => iframeRef.current?.contentDocument ?? null
   const editorWin = () => iframeRef.current?.contentWindow ?? null
 
-  /** Amber-mark chips whose field name resolves to no column; teal for rules. */
   const refreshBindings = useCallback(() => {
     const doc = editorDoc()
     if (!doc) return
@@ -383,7 +335,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       const rule = rules[tag]
       chip.classList.toggle('ttg-rulebound', Boolean(rule))
       chip.classList.toggle('ttg-unbound', !eff && !rule)
-      // Hover answers "which column fills this?" without opening the popover.
       chip.title = rule
         ? `Se rellena con la regla «${rule.rule.label}»`
         : eff
@@ -392,7 +343,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     })
   }, [])
 
-  /** Pending debounced persist (typing schedules; discrete actions flush). */
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const persist = useCallback(() => {
@@ -405,24 +355,16 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     refreshBindings()
   }, [setEditorHtml, refreshBindings])
 
-  /**
-   * Debounced persist for typing: serialising + un-decorating a ~1 MB body on
-   * EVERY keystroke (and re-parsing it downstream) made typing sluggish. The
-   * 300 ms window sits well inside the store's 1.5 s history coalescing, so
-   * undo snapshots are unaffected.
-   */
+  // Debounce serialization of large bodies; history coalesces independently.
   const schedulePersist = useCallback(() => {
     if (persistTimer.current !== null) clearTimeout(persistTimer.current)
     persistTimer.current = setTimeout(persist, 300)
   }, [persist])
 
-  /** Flush a pending debounced persist (no-op when nothing is pending). */
   const flushPersist = useCallback(() => {
     if (persistTimer.current !== null) persist()
   }, [persist])
 
-  /** Checkpoint for a DISCRETE action: the store must hold the latest typed
-   * text first, or undoing the action would also drop those characters. */
   const checkpointFlushed = useCallback(
     (label: string) => {
       flushPersist()
@@ -431,18 +373,9 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     [flushPersist],
   )
 
-  // Unmount with a pending persist: flush so the last keystrokes survive.
   useEffect(() => flushPersist, [flushPersist])
 
-  /**
-   * Make hand-typed blocks look like the document: Google's exports carry
-   * their fonts in CSS classes (paragraph classes on <p>, run classes on
-   * <span>), so a fresh block contenteditable inserts (`<p>`/`<div>` with no
-   * class) renders in the browser's default font — fine-looking in the editor
-   * only by accident, wrong in the preview/PDF. When the caret sits in such a
-   * block, copy the previous block's class and wrap bare text in a span
-   * cloned from that block's last styled run. Caret is restored explicitly.
-   */
+  // Copy nearby Google font classes into newly typed, classless blocks.
   const inheritTypedBlockStyle = useCallback(() => {
     const doc = editorDoc()
     const sel = doc?.defaultView?.getSelection()
@@ -452,9 +385,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       n.nodeType === Node.ELEMENT_NODE &&
       (n as HTMLElement).getAttribute('data-ttg-repeat') === 'true'
 
-    // Nearest block whose parent is the body OR a repeat wrapper — typing
-    // inside a marked section must inherit the document style too (walking
-    // only to body-level used to land on the wrapper itself and give up).
+    // Walk through repeat wrappers so marked sections inherit document styles.
     let node: Node | null = sel.anchorNode
     while (node && node.parentNode !== doc.body && !isRepeatWrapper(node.parentNode)) {
       node = node.parentNode
@@ -465,12 +396,9 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     if ((tag !== 'p' && tag !== 'div') || block.className || block.hasAttribute('data-cond')) return
     if (isRepeatWrapper(block)) return
 
-    // Prefer previous content, then following content (important for a new
-    // first line), then the repeat wrapper/body. Computed style is copied as
-    // a minimal fallback even when the source font only exists in CSS.
+    // Prefer nearby content; computed style is a fallback for CSS-only fonts.
     const reference = adjacentContent(block, 'previous') ?? adjacentContent(block, 'next')
     if (reference?.className) block.className = reference.className
-    // Drive-API exports carry the paragraph's geometry as inline style.
     if (!block.getAttribute('style') && reference?.getAttribute('style')) {
       block.setAttribute('style', reference.getAttribute('style')!)
     }
@@ -480,9 +408,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         capturedTextStyle(isRepeatWrapper(block.parentElement) ? block.parentElement : doc.body),
     )
 
-    // Reference run: public exports style runs with classes, Drive-API
-    // exports with inline styles — accept either (the FONT lives there, so
-    // without this the typed text falls back to the browser default).
+    // Public exports use classes; Drive API exports use inline styles.
     const refSpan = Array.from(
       reference?.querySelectorAll<HTMLElement>('span[class], span[style]') ?? [],
     )
@@ -500,20 +426,13 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         span.appendChild(child)
       }
     }
-    // Re-anchor the caret: moving its text node into the span clears it.
     try {
       sel.collapse(caret.node, caret.offset)
     } catch {
-      /* caret restore is best-effort */
     }
   }, [])
 
-  /**
-   * Chip-ify `{{campo}}` the moment it is typed: decorateFields only runs when
-   * the iframe is (re)written, so a hand-typed field would stay plain text
-   * (colourless, hard to tell apart) until the next reload. Scans the block
-   * under the caret and re-anchors the caret after the replacement.
-   */
+  // Chip-ify complete tags as they are typed; decorateFields runs only on load.
   const liveDecorateFields = useCallback(() => {
     const doc = editorDoc()
     const sel = doc?.defaultView?.getSelection()
@@ -555,7 +474,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     }
   }, [])
 
-  /** Range at the saved cursor, or collapsed at the end of the document. */
   const cursorRange = useCallback((): Range | null => {
     const doc = editorDoc()
     const win = editorWin()
@@ -574,7 +492,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     return range
   }, [])
 
-  /** Toolbar state: which inline formats apply at the current caret. */
   const refreshFmt = useCallback(() => {
     const rich = richFormatTarget.current
     const doc = rich?.element.isConnected ? rich.element.ownerDocument : editorDoc()
@@ -605,12 +522,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     [refreshFmt],
   )
 
-  /**
-   * Apply an inline/paragraph format to the current selection. The toolbar
-   * lives OUTSIDE the iframe, so the saved selection is restored first;
-   * `styleWithCSS` (set at init) makes execCommand emit inline styles like
-   * Google's own export instead of <b>/<font> tags.
-   */
   const execFormat = useCallback(
     (command: string, value?: string) => {
       const rich = richFormatTarget.current
@@ -625,7 +536,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         try {
           doc.execCommand('styleWithCSS', false, 'true')
         } catch {
-          /* best effort, matching the iframe editor */
         }
         applyEditorFormat(doc, command, value, rich.range, rich.element)
         if (sel.rangeCount) rich.range = sel.getRangeAt(0).cloneRange()
@@ -646,12 +556,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         sel?.addRange(savedRange.current)
       }
 
-      // Chips are contenteditable=false, and Chromium refuses to apply
-      // execCommand across a selection containing non-editable elements — so
-      // formatting a phrase WITH a field in it silently did nothing. Unlock
-      // the affected chips for the duration of the command (undecorateFields
-      // preserves the style spans this puts inside them). Boundaries falling
-      // INSIDE a chip are widened so a field is always styled whole.
+      // Temporarily unlock chips: Chromium skips non-editable nodes in ranges.
       const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null
       if (range) {
         const chipOf = (node: Node): HTMLElement | null => {
@@ -669,16 +574,11 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
 
       applyEditorFormat(doc, command, value, range, doc.body)
 
-      // Re-lock every chip (also those execCommand may have split/cloned).
       for (const chip of doc.body.querySelectorAll<HTMLElement>('.ttg-chip')) {
         chip.setAttribute('contenteditable', 'false')
       }
 
-      // Google's export gives paragraphs their own first-line indent
-      // (text-indent) and side margins via CSS classes. text-align:center
-      // alone leaves the first line pushed right of centre and the whole box
-      // offset — the text looks anchored to its first letter. Centring a
-      // paragraph means centring it ON THE PAGE, so neutralise those.
+      // Google paragraph indents otherwise offset centered text on the page.
       if (command === 'justifyCenter') {
         const r = sel && sel.rangeCount ? sel.getRangeAt(0) : null
         if (r) {
@@ -722,7 +622,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     [persist],
   )
 
-  /** Top-level block (direct child of body) containing a node. */
   const topBlockOf = useCallback((start: Node | null): HTMLElement | null => {
     const doc = editorDoc()
     if (!doc || !start) return null
@@ -731,11 +630,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     return node && node.nodeType === 1 ? (node as HTMLElement) : null
   }, [])
 
-  /**
-   * The node a range boundary points at. Clicks in contenteditable sometimes
-   * leave the caret at BODY level (container = body, offset = child index) —
-   * descend to the child so the block walk works.
-   */
   const boundaryNode = useCallback((container: Node, offset: number, end = false): Node | null => {
     const doc = editorDoc()
     if (!doc || container !== doc.body) return container
@@ -745,7 +639,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     return kids[idx] ?? null
   }, [])
 
-  /** Top-level block holding the cursor. */
   const cursorBlock = useCallback((): HTMLElement | null => {
     const range = cursorRange()
     if (!range) return null
@@ -764,17 +657,12 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       : capturedTextStyle(startBlock)
     checkpointFlushed('Sección repetible')
 
-    // Repeating only has meaning when several rows feed one document. If the
-    // user MARKS a section while in per-row mode, ask to switch to per-group
-    // instead of silently marking something the engine would ignore.
-    // (Un-marking is always allowed.)
+    // Repeat markers only affect grouped output; avoid silently ignoring them.
     const marksNew =
       startBlock.getAttribute('data-ttg-repeat') !== 'true' ||
       (endBlock && endBlock !== startBlock)
 
     if (endBlock && endBlock !== startBlock) {
-      // Selection spans several blocks -> wrap the contiguous run in ONE
-      // repeatable section.
       const wrapper = doc.createElement('div')
       wrapper.setAttribute('data-ttg-repeat', 'true')
       applyCapturedTextStyle(wrapper, repeatStyle)
@@ -790,7 +678,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       const el = startBlock
       if (el.getAttribute('data-ttg-repeat') === 'true') {
         if (el.tagName === 'DIV' && el.children.length > 0 && !el.getAttribute('data-cond')) {
-          // A wrapper section: unwrap its blocks back into the body.
           const wrapperStyle = sanitizeConditionalTextStyle({
             fontFamily: el.style.fontFamily,
             fontSize: el.style.fontSize,
@@ -808,10 +695,7 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
           el.removeAttribute('data-ttg-repeat')
         }
       } else {
-        // Single block: mark a WRAPPER around it, not the block itself — the
-        // block's own paragraph geometry (Google margins, negative
-        // text-indent) broke the section chrome (label pushed out of the
-        // box, background narrower than the page).
+        // Wrap a single block so its Google paragraph geometry stays intact.
         const wrapper = doc.createElement('div')
         wrapper.setAttribute('data-ttg-repeat', 'true')
         applyCapturedTextStyle(wrapper, repeatStyle)
@@ -837,7 +721,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     }
   }, [])
 
-  /** Insert a new conditional block after `after` (or at the end) and edit it. */
   const insertCondAfter = useCallback(
     (after: HTMLElement | null) => {
       const doc = editorDoc()
@@ -885,8 +768,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
         editorWin()?.focus()
         editorDoc()?.body.focus()
         checkpointFlushed(`Campo «${name.trim()}»`)
-        // With no saved cursor the range falls back to the END of the doc,
-        // possibly out of view — scroll there and say so (N1 feedback).
         const hadCursor = !!savedRange.current
         const range = cursorRange()
         if (!range) return
@@ -911,7 +792,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     ],
   )
 
-  // (Re)write the iframe whenever a new source doc is loaded, and on mount.
   useEffect(() => {
     const doc = editorDoc()
     if (!doc) return
@@ -921,18 +801,13 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     const body = doc.body
     setTemplateColors(documentTextColors(doc))
 
-    // Inline styles (like Google's export) instead of <b>/<font> wrappers.
     try {
       doc.execCommand('styleWithCSS', false, 'true')
-      // Enter creates <p> (matches the doc's base p{} rule), not <div>.
       doc.execCommand('defaultParagraphSeparator', false, 'p')
     } catch {
-      /* non-blocking */
     }
 
-    // Recipes created before rich rule text did not persist a font context,
-    // and old repeat wrappers could contain classless paragraphs. Repair both
-    // from their nearest real document content without adding an undo entry.
+    // Repair old recipes missing rich rule context or paragraph classes.
     let repairedStyleContext = false
     for (const cond of body.querySelectorAll<HTMLElement>('.ttg-cond[data-cond]')) {
       const rule = decodeCond(cond.getAttribute('data-cond') ?? '')
@@ -951,27 +826,22 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     }
     if (repairedStyleContext) persist()
 
-    // History checkpoint at the START of a typing burst: beforeinput fires
-    // BEFORE the DOM mutates, so the store still holds the pre-change state
-    // (bursts coalesce in the store; see pushHistory).
+    // beforeinput fires before mutation, so checkpoint at the start of a burst.
     body.addEventListener('beforeinput', () => {
       useWorkspace.getState().checkpoint('Escritura')
     })
-    // Native contenteditable undo cannot see our programmatic mutations
-    // (chips, wrappers, margins), so route Ctrl+Z/Y to OUR history instead.
+    // Native undo cannot see chip/wrapper/margin mutations; use app history.
     doc.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase()
       if (!(e.ctrlKey || e.metaKey) || (k !== 'z' && k !== 'y')) return
       e.preventDefault()
-      // The undo snapshot must include the keystrokes still in the debounce.
       flushPersist()
       const st = useWorkspace.getState()
       const label = k === 'y' || (k === 'z' && e.shiftKey) ? st.redo() : st.undo()
       if (label) st.notify(`${k === 'y' || e.shiftKey ? 'Rehecho' : 'Deshecho'}: ${label}`)
     })
 
-    // Backspace/Delete beside a chip: handled explicitly (Chromium's default
-    // on contenteditable=false neighbours is erratic, often a silent no-op).
+    // Handle deletion beside chips explicitly; Chromium otherwise may no-op.
     body.addEventListener('keydown', (e) => {
       if (e.key !== 'Backspace' && e.key !== 'Delete') return
       const sel = doc.defaultView?.getSelection()
@@ -998,8 +868,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     body.addEventListener('focusout', persist)
     doc.addEventListener('selectionchange', refreshFmt)
 
-    // Clicks: a field chip opens the binding popover; an inline conditional
-    // opens its editor.
     body.addEventListener('click', (e) => {
       const target = e.target as HTMLElement | null
       const cond = target?.closest?.('.ttg-cond') as HTMLElement | null
@@ -1015,7 +883,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       if (chip?.dataset.field) {
         const tag = chip.dataset.field
         const bound = useWorkspace.getState().ruleBindings[tag]
-        // A rule-bound tag re-opens its rule editor; the rest, the bind popover.
         if (bound) {
           const textStyle = bound.rule.textStyle ?? capturedTextStyle(chip)
           setBindingRule({
@@ -1029,15 +896,12 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       }
     })
 
-    // Native drag & drop from the palette into the document.
     body.addEventListener('dragover', (e) => {
       const types = e.dataTransfer?.types ?? []
       if (!types.includes(DRAG_MIME) && !types.includes(COND_MIME)) return
       e.preventDefault()
       e.dataTransfer!.dropEffect = 'copy'
-      // Move the caret with the pointer so the insertion point is visible,
-      // and draw an explicit insertion marker (the native caret is easy to
-      // miss while the iframe is unfocused during a drag).
+      // Draw an explicit marker while the iframe is unfocused during a drag.
       const r = rangeFromPoint(doc, e.clientX, e.clientY)
       if (r) {
         const sel = doc.defaultView?.getSelection()
@@ -1047,7 +911,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
       }
     })
     body.addEventListener('dragleave', (e) => {
-      // relatedTarget null = the pointer left the iframe entirely.
       if (!e.relatedTarget) hideDropMarker(doc)
     })
     body.addEventListener('drop', (e) => {
@@ -1075,14 +938,10 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
     })
 
     refreshBindings()
-    // NO cleanup persisting the body here: on a docToken change the cleanup
-    // runs BEFORE the new document is written, so it would overwrite the
-    // freshly loaded editorHtml with the PREVIOUS iframe content (empty on
-    // first load). Edits are already persisted by the input/focusout listeners.
+    // Do not persist in cleanup: docToken cleanup runs before the new HTML is written.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docToken])
 
-  // Re-evaluate chip binding marks when data or explicit bindings change.
   useEffect(() => {
     refreshBindings()
   }, [data, mapping, ruleBindings, refreshBindings])
@@ -1149,8 +1008,6 @@ export const DocCanvas = forwardRef<DocCanvasHandle, { className?: string }>(fun
           implicit={!mapping[bindTag.tag]}
           format={tagFormats[bindTag.tag] ?? null}
           onAssign={(c) => {
-            // First bind keeps the popover open so the format can be picked in
-            // the same visit; changing an existing binding closes as before.
             const had = Boolean(effectiveMapping([bindTag.tag], columns, mapping)[bindTag.tag])
             assign(bindTag.tag, c)
             if (had) setBindTag(null)

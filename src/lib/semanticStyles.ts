@@ -1,17 +1,6 @@
 import { parse } from 'node-html-parser'
 
-/**
- * Reinforce inline CSS emphasis with semantic tags for Google's HTML
- * importer. The editor (execCommand with styleWithCSS) emits styles like
- * `<span style="font-weight: bold">…</span>`; Google Docs' HTML→Doc
- * conversion is documented (see googleNative.ts) to degrade font weights
- * carried as CSS, while it reliably honours <b>/<i>/<u>/<s>. Wrapping the
- * styled element's content keeps the CSS (harmless elsewhere) and gives the
- * importer a signal it understands.
- *
- * Only used on the HTML uploaded to Google — the local preview/PDF render
- * the CSS correctly and never need this.
- */
+// Google preserves semantic emphasis tags more reliably than CSS-only styles.
 
 const BOLD_RE = /font-weight\s*:\s*(bold|bolder|[6-9]00)\b/i
 const ITALIC_RE = /font-style\s*:\s*italic\b/i

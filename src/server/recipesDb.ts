@@ -11,7 +11,6 @@ import {
   requireUuid,
 } from './validate'
 
-/** Durable, owner-scoped template library and immutable version history. */
 
 export interface RecipeSummary {
   id: string
@@ -40,7 +39,6 @@ function dbError(err: unknown): { ok: false; error: string; hint?: string } {
   return { ok: false, error: e?.message || 'La base de datos devolvio un error.', hint: e?.hint }
 }
 
-/** Payload to save: a Recipe minus DB-managed identity/version fields. */
 export type RecipeInput = Omit<Recipe, 'id' | 'savedAt' | 'currentVersion'>
 
 interface StoredApiConfig {
@@ -82,7 +80,6 @@ function fromStoredApiConfig(raw: unknown): ApiSourceConfig | undefined {
   }
 }
 
-/** Encrypted API login body used by data fetching when the client is redacted. */
 export async function storedAuthBodyEnc(
   sql: import('postgres').Sql,
   recipeId: string,

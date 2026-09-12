@@ -9,12 +9,6 @@ import { buildTemplateCached } from '../lib/template/parse'
 import { COND_MIME, DRAG_MIME } from './DocCanvas'
 import type { DocCanvasHandle } from './DocCanvas'
 
-/**
- * Scratch-style palette: data columns you drag (or click) into the document,
- * plus the building blocks (conditional text, repeatable section). Page breaks
- * are not a block: they are Google's business when generating via a connected
- * account, and auto-synced from the source doc on the local fallback.
- */
 export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | null> }) {
   const {
     data,
@@ -34,18 +28,13 @@ export function Palette({ canvas }: { canvas: React.RefObject<DocCanvasHandle | 
   const [suggesting, setSuggesting] = useState(false)
 
   const columns = data?.columns ?? []
-  // Cached: shares the parse with Workspace instead of re-parsing per render
-  // (same arguments, INCLUDING sourceUrl, or the shared cache would thrash).
   const template = editorHtml
     ? buildTemplateCached(editorHtml, editorCss, editorTitle, templateUrl || 'editor', editorBodyClass)
     : null
   const unbound = unmappedTags(template, columns, mapping, ruleBindings)
-  /** Tags physically present in the document — only these can host a rule. */
   const docTags = new Set(template?.tags ?? [])
 
   async function autoSuggest() {
-    // AI first (server fn), name-similarity heuristic as fallback. Only the
-    // UNMAPPED tags travel; mergeMapping never overwrites a manual choice.
     if (!template || columns.length === 0 || suggesting) return
     const tags = unbound
     if (tags.length === 0) return

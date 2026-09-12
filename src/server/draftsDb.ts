@@ -2,22 +2,12 @@ import { createServerFn } from '@tanstack/react-start'
 import type { Result } from './fetch'
 import { requireInt, requireRecord, requireString } from './validate'
 
-/**
- * Workspace draft (autosave) on Postgres — one row per user, so the working
- * draft follows the account across browsers instead of living in a shared
- * localStorage. The payload is the exact JSON string zustand's persist
- * middleware produces; the server never parses it. savedAtMs is the CLIENT
- * clock at save time: the browser compares it with its local mirror on
- * hydration (newest wins — see state/draftStorage.ts).
- */
 
 export interface WorkspaceDraft {
   payload: string
   savedAtMs: number
 }
 
-/** Hard cap so a runaway payload cannot fill the DB (inlined images can make
- * a draft big, but not THIS big). */
 const MAX_PAYLOAD_BYTES = 25 * 1024 * 1024
 
 function dbError(err: unknown): { ok: false; error: string; hint?: string } {
@@ -32,7 +22,6 @@ function dbError(err: unknown): { ok: false; error: string; hint?: string } {
   return { ok: false, error: e?.message || 'La base de datos devolvió un error.', hint: e?.hint }
 }
 
-/** The session user's draft, or null when they have none yet. */
 export const getDraftFn = createServerFn({ method: 'GET' }).handler(
   async (): Promise<Result<WorkspaceDraft | null>> => {
     const s = await import('./session')
@@ -54,7 +43,6 @@ export const getDraftFn = createServerFn({ method: 'GET' }).handler(
   },
 )
 
-/** Upsert the session user's draft (last write wins). */
 export const saveDraftFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const i = requireRecord(input, 'petición')

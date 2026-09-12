@@ -69,8 +69,6 @@ describe('effectiveMapping', () => {
     expect(effectiveMapping(['OTRO'], ['NOMBRE'], {})).toEqual({ OTRO: null })
   })
 
-  // Sheet-tab switch: explicit bindings to columns absent from the CURRENT
-  // data must not look bound (they'd silently substitute empty at generate).
   it('ignores a stale explicit binding whose column is gone', () => {
     expect(effectiveMapping(['X'], ['NOMBRE'], { X: 'VIEJA' })).toEqual({ X: null })
   })

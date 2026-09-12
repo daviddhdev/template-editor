@@ -4,7 +4,6 @@ import { saveRecipeFn, updateRecipeFn } from '../server/recipesDb'
 import { useWorkspace } from '../state/workspaceStore'
 import { Button, ErrorNote, Spinner, TextInput, useDialogChrome } from './ui'
 
-/** Save a new template or append an immutable version to the linked template. */
 export function SaveRecipeDialog({ onClose }: { onClose: () => void }) {
   const { editorTitle, savedRecipe, notify } = useWorkspace()
   const [name, setName] = useState(savedRecipe?.name ?? '')

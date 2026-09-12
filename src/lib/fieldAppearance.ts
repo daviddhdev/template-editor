@@ -1,18 +1,14 @@
 export const FIELD_STYLE_ATTR = 'data-ttg-field-style'
 
 export interface FieldAppearance {
-  /** Explicit override stored for this occurrence; null means inherited. */
   fontSizePt: number | null
-  /** Explicit opaque colour override, normalised to #RRGGBB; null = inherited. */
   colorHex: string | null
-  /** Effective values shown in the controls, including inherited document CSS. */
   effectiveFontSizePt: number
   effectiveColorHex: string
 }
 
 const RGB_RE = /^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)(?:\s*,\s*(\d*(?:\.\d+)?))?\s*\)$/i
 
-/** Normalise browser/CSS opaque colours to #RRGGBB. */
 export function colorToHex(value: string | null | undefined): string | null {
   const raw = value?.trim()
   if (!raw || raw.toLowerCase() === 'transparent') return null
@@ -51,7 +47,6 @@ export function readFieldAppearance(chip: HTMLElement): FieldAppearance {
   }
 }
 
-/** Apply an explicit override to exactly one decorated chip occurrence. */
 export function setFieldAppearance(
   chip: HTMLElement,
   patch: { fontSizePt?: number | null; colorHex?: string | null },
@@ -79,7 +74,6 @@ export function setFieldAppearance(
   wrapper.style.color = nextColor ?? ''
 }
 
-/** Colours used by actual document text, weighted by visible character count. */
 export function documentTextColors(doc: Document, current?: string): string[] {
   const counts = new Map<string, number>()
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)

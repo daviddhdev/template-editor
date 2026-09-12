@@ -61,12 +61,6 @@ export function ErrorNote({ title, hint }: { title: string; hint?: string }) {
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])'
 
-/**
- * Shared dialog behaviour: close on Escape, keep Tab cycling INSIDE the
- * dialog (focus trap — attach the returned ref to the dialog element), and
- * return focus to whatever had it before the dialog opened
- * (WCAG 2.1.2 / 2.4.3). Call from any component rendered as a modal/popover.
- */
 export function useDialogChrome(onClose: () => void) {
   const closeRef = useRef(onClose)
   closeRef.current = onClose
@@ -78,7 +72,6 @@ export function useDialogChrome(onClose: () => void) {
         closeRef.current()
         return
       }
-      // Tab wraps inside the dialog instead of escaping to the background.
       if (e.key !== 'Tab' || !dialogRef.current) return
       const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE))
       if (items.length === 0) return
@@ -106,10 +99,6 @@ export function useDialogChrome(onClose: () => void) {
   return dialogRef
 }
 
-/**
- * One-at-a-time transient notice. The aria-live region stays mounted so
- * screen readers announce new notices; visual auto-dismiss after 4 s.
- */
 export function Toast({
   text,
   token,
@@ -140,7 +129,6 @@ export function Toast({
   )
 }
 
-/** Small confirmation modal for destructive actions (reset, disconnect…). */
 export function ConfirmDialog({
   title,
   body,

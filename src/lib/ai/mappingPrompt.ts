@@ -1,26 +1,13 @@
 import type { TagMapping } from '../../types'
 
-/**
- * Pure helpers for the AI mapping suggestion (server/aiMapping.ts). Kept out
- * of the server function so prompt building and response validation are
- * unit-testable without HTTP. The heuristic fallback lives in
- * suggestMapping.ts and does not depend on any of this.
- */
 
-/** Privacy decision: at most this many rows ever leave the app… */
 export const MAX_SAMPLE_ROWS = 5
-/** …and every cell value is truncated to this many characters. */
 export const MAX_SAMPLE_CHARS = 60
 
 export function truncateSample(value: string): string {
   return value.length > MAX_SAMPLE_CHARS ? value.slice(0, MAX_SAMPLE_CHARS) + '…' : value
 }
 
-/**
- * First rows reduced to the known columns with truncated values — the ONLY
- * cell data that is sent to the AI provider. Empty cells are dropped (no
- * signal, fewer tokens).
- */
 export function sampleRowsForMapping(
   rows: readonly Record<string, string>[] | undefined,
   columns: readonly string[],
@@ -36,10 +23,6 @@ export function sampleRowsForMapping(
   })
 }
 
-/**
- * Chat messages for the mapping request. The user content is JSON so the
- * model never confuses field names with instructions.
- */
 export function buildMappingMessages(
   tags: readonly string[],
   columns: readonly string[],
@@ -63,10 +46,6 @@ export function buildMappingMessages(
   return { system, user }
 }
 
-/**
- * Strict JSON schema for the response: one required key per (unique) tag,
- * each either one of the known columns or null.
- */
 export function mappingSchema(
   tags: readonly string[],
   columns: readonly string[],
@@ -79,11 +58,6 @@ export function mappingSchema(
   return { type: 'object', properties, required: uniq, additionalProperties: false }
 }
 
-/**
- * Parse and sanitize the model's reply. Never trusts the schema enforcement:
- * unknown columns become null, keys outside `tags` are dropped, missing tags
- * come back as null. Throws (Spanish, user-visible) on non-JSON content.
- */
 export function parseMappingContent(
   content: string,
   tags: readonly string[],

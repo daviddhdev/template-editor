@@ -17,7 +17,6 @@ describe('buildGroups key uniqueness', () => {
       { mode: 'per_row', groupByColumn: null },
     )
     expect(groups.map((g) => g.key)).toEqual(['García, Ana', 'García, Ana (2)', 'García, Ana (3)'])
-    // Each group still carries ITS row, not the first one's.
     expect(groups.map((g) => g.rows.length)).toEqual([1, 1, 1])
   })
 

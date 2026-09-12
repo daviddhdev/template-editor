@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { norm } from './GenerateDialog'
 
-// `norm` backs the document checklist search: matching is accent- and
-// case-insensitive substring on the label (the group key), so finding one
-// client among a batch works regardless of accents or capitalisation.
 describe('norm (checklist search)', () => {
   it('lowercases and strips accents', () => {
     expect(norm('García, Ana')).toBe('garcia, ana')

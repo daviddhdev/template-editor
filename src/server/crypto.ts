@@ -1,13 +1,3 @@
-/**
- * Symmetric encryption for secrets stored in the database (SERVER ONLY).
- *
- * Used for the API-source login credentials a recipe carries: unlike the Google
- * refresh token (which never leaves the server) these are chosen by the user
- * and could round-trip, so they are encrypted at rest and never returned to the
- * client (see recipesDb.ts). AES-256-GCM with a per-value random salt + IV; the
- * key is derived from APP_SECRET via scrypt. Output is a self-describing
- * base64url string `v1.<salt>.<iv>.<tag>.<ciphertext>`.
- */
 
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
 import { readDotEnv } from './env'
@@ -29,7 +19,6 @@ function appSecret(): string {
 const b64 = (b: Buffer): string => b.toString('base64url')
 const unb64 = (s: string): Buffer => Buffer.from(s, 'base64url')
 
-/** Encrypt a plaintext secret into the self-describing token above. */
 export function encryptSecret(plain: string): string {
   const salt = randomBytes(SALT_LEN)
   const iv = randomBytes(IV_LEN)
@@ -40,7 +29,6 @@ export function encryptSecret(plain: string): string {
   return [SCHEME, b64(salt), b64(iv), b64(tag), b64(enc)].join('.')
 }
 
-/** Reverse {@link encryptSecret}. Throws on a malformed or tampered token. */
 export function decryptSecret(token: string): string {
   const parts = token.split('.')
   if (parts.length !== 5 || parts[0] !== SCHEME) {

@@ -11,14 +11,6 @@ import {
   requireUuid,
 } from './validate'
 
-/**
- * Generation audit log (generation_runs): one row per batch, recorded in two
- * steps — INSERT when the batch starts (status 'running') and an idempotent
- * finalising UPDATE when it ends. A row left 'running' without finished_at is
- * evidence of an interrupted batch. Retries re-finalise the same row.
- * Append-only by design (legal audit trail): rows are never deleted, and
- * recipe_id keeps the literal id even after the template is gone.
- */
 
 export type GenerationRoute = 'native' | 'google_html' | 'local'
 
@@ -69,7 +61,6 @@ function validDocs(v: unknown, what: string): GenerationDoc[] {
   })
 }
 
-/** Open the audit row for a starting batch. */
 export const startGenerationFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const i = requireRecord(input, 'petición')
@@ -95,8 +86,6 @@ export const startGenerationFn = createServerFn({ method: 'POST' })
       const { getSql } = await import('./db')
       const sql = await getSql()
       const docs: GenerationDoc[] = data.docNames.map((name) => ({ name, status: 'pending' }))
-      // actor_email is derived from the session (never client input): it is
-      // the audit's point-in-time snapshot of who ran the batch.
       const rows = await sql`
         INSERT INTO generation_runs (owner_id, recipe_id, template_name, route, data_kind,
           data_url, row_count, formats, actor_email, doc_count, docs)
@@ -110,9 +99,6 @@ export const startGenerationFn = createServerFn({ method: 'POST' })
     }
   })
 
-/** Finalise (or re-finalise after a retry) the audit row. Idempotent: it
- * rewrites docs and counters wholesale, so calling it again after retries
- * simply brings the row up to date. Counters derive from docs server-side. */
 export const finishGenerationFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const i = requireRecord(input, 'petición')
@@ -146,7 +132,6 @@ export const finishGenerationFn = createServerFn({ method: 'POST' })
     }
   })
 
-/** The user's newest batches first, for the home-screen history section. */
 export const listGenerationsFn = createServerFn({ method: 'GET' }).handler(
   async (): Promise<Result<GenerationRunSummary[]>> => {
     const s = await import('./session')
@@ -155,8 +140,6 @@ export const listGenerationsFn = createServerFn({ method: 'GET' }).handler(
     try {
       const { getSql } = await import('./db')
       const sql = await getSql()
-      // No pagination yet (LIMIT 50). If this ever grows: paginate — this is
-      // an audit trail, rows are never purged.
       const rows = await sql`
         SELECT * FROM generation_runs WHERE owner_id = ${user.id}
         ORDER BY started_at DESC LIMIT 50`

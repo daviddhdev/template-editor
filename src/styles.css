@@ -1,8 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
-/* Talos design system: warm paper surfaces, petrol actions, and restrained
-   bronze/gold details. Document content keeps its own imported typography. */
 @theme {
   --font-sans: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
@@ -23,7 +21,6 @@
   --color-ink-muted: #687572;
   --color-ink-faint: #939B98;
 
-  /* Compatibility names used by existing semantic UI states. */
   --color-accent-sky: #0F5C5E;
   --color-accent-purple: #D8A85D;
   --color-accent-pink: #B85C38;
@@ -57,7 +54,6 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Field "chip" — the visual token for {{campo}} inside the template editor. */
 .ttg-chip {
   display: inline;
   background: rgba(15, 92, 94, 0.1);
@@ -72,7 +68,6 @@ body {
   user-select: all;
 }
 
-/* Placeholder text for the empty contenteditable editor. */
 .ttg-editor:empty::before {
   content: attr(data-placeholder);
   color: var(--color-ink-faint);

@@ -13,7 +13,6 @@ import {
 const DOCX_MIME = FORMAT_MIME.docx
 const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document'
 
-/** One tag's substitution: every literal spelling it may have in the doc. */
 export interface NativeReplacement {
   tag: string
   finds: string[]
@@ -25,7 +24,6 @@ export interface NativeEdit {
   replace: string
 }
 
-/** Style override for one zero-based occurrence of a tag in source order. */
 export interface NativeFieldStyle {
   tag: string
   occurrence: number
@@ -33,32 +31,20 @@ export interface NativeFieldStyle {
   colorHex?: string
 }
 
-/** One output document: display name + the tag substitutions for its group. */
 export interface NativeJob {
   name: string
-  /** Safe in-app text edits, applied before resolving template tags. */
   edits?: NativeEdit[]
   styles?: NativeFieldStyle[]
   replacements: NativeReplacement[]
 }
 
 export interface NativeResult extends PdfResult {
-  /** Tags none of whose spellings matched in some document (shown as a warning
-   * — the tag would still be visible as literal text in the output). */
   unmatched: string[]
 }
 
-/**
- * Short-lived cache of the source file's bytes: the dialog now generates one
- * document per call for live progress, and re-downloading the original (~1 MB)
- * for every document would be pure waste. A batch finishes well inside the
- * TTL; edits to the source mid-batch are an accepted (rare) staleness window.
- */
 const sourceCache = new Map<string, { bytes: Uint8Array; mime: string; at: number }>()
 const SOURCE_TTL_MS = 5 * 60_000
 
-/** Drop expired entries (the TTL check on read never removed anything, so
- * the cache grew without bound across a long-lived server). */
 function pruneSourceCache(): void {
   const now = Date.now()
   for (const [key, entry] of sourceCache) {
@@ -66,24 +52,8 @@ function pruneSourceCache(): void {
   }
 }
 
-/**
- * The NATIVE generation route: instead of re-importing edited HTML (lossy —
- * flattened page headers, dropped drawings, degraded font weights), the
- * ORIGINAL Drive file is re-materialised as a Google Doc per output document
- * and its `{{tags}}` are substituted with the Docs API's replaceAllText,
- * which reaches page headers/footers too. Everything Google's converters
- * preserve (images, borders, fonts, weights, page geometry) stays intact.
- *
- * Source bytes are acquired ONCE:
- *  - office file (.docx…): raw download (`alt=media`, allowed by
- *    drive.readonly) and re-upload with conversion — the exact same import
- *    conversion `files.copy` would run, but the copy is app-created so the
- *    drive.file scope can edit/export/delete it (files.copy itself would
- *    need the full `drive` scope and force every user to re-consent);
- *  - native Google Doc: export to DOCX and re-upload with conversion (a
- *    Doc→DOCX→Doc roundtrip through Google's own converters; embedded
- *    drawings may rasterise, still far better than the HTML roundtrip).
- */
+// Native generation reuses the original Drive file, preserving layout that
+// Google's HTML importer would lose. Source bytes are cached per user/file.
 export const generateNativePdfFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const i = requireRecord(input, 'petición')
@@ -145,8 +115,7 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
     const unmatched = new Set<string>()
     try {
       let token = await g.getAccessToken(user.id)
-      // Cache key includes the user: two accounts can have DIFFERENT access
-      // to the same file id — a shared entry would leak bytes across them.
+  // Include the user: access to a file id differs between accounts.
       const cacheKey = `${user.id}:${data.sourceFileId}`
       const cached = sourceCache.get(cacheKey)
       let sourceBytes: Uint8Array
@@ -165,10 +134,7 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
         sourceCache.set(cacheKey, { bytes: sourceBytes, mime: uploadMime, at: Date.now() })
       }
 
-      // Sequential on purpose: predictable order and comfortably inside
-      // Drive/Docs per-user rate limits even for large batches.
       for (const job of data.jobs) {
-        // Re-checked per job: a long batch can outlive one access token.
         token = await g.getAccessToken(user.id)
         const name = safeName(job.name)
         const copyId = await g.withRetry(() => g.uploadAsGoogleDoc(token, name, sourceBytes, uploadMime))
@@ -194,8 +160,6 @@ export const generateNativePdfFn = createServerFn({ method: 'POST' })
           const results = await g.withRetry(() =>
             g.replaceAllTextInDoc(token, copyId, flat.map(({ find, replace }) => ({ find, replace }))),
           )
-          // A tag is unmatched only when NONE of its spellings hit (extra
-          // canonical variants legitimately match nothing).
           const hits = new Map<string, number>()
           results.forEach((res, i) => {
             const tag = flat[i].tag

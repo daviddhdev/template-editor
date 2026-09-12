@@ -5,27 +5,18 @@ import { BrandLockup } from "../components/Brand";
 import { meFn } from "../server/auth";
 import { googleAuthUrlFn } from "../server/google";
 
-/**
- * Login screen: the Google OAuth consent IS the login (it also grants the
- * Drive permissions the generator needs). Where to return after logging in
- * travels via sessionStorage — the OAuth roundtrip through Google keeps no
- * app state besides the CSRF `state`.
- */
 export const Route = createFileRoute("/login")({
   validateSearch: (s: Record<string, unknown>): { redirect?: string } =>
     typeof s.redirect === "string" && s.redirect
       ? { redirect: s.redirect }
       : {},
   beforeLoad: async ({ search }) => {
-    // Already logged in: skip the screen. DB down: render it anyway — the
-    // error will surface actionably when the login is attempted.
     const res = await meFn().catch(() => null);
     if (res?.ok && res.data) throw redirect({ to: search.redirect || "/" });
   },
   component: LoginScreen,
 });
 
-/** Where /oauth/callback should land after a successful login. */
 export const LOGIN_REDIRECT_KEY = "ttg-login-redirect";
 
 function LoginScreen() {

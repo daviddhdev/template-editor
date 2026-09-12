@@ -1,4 +1,3 @@
-/** Browser-side helpers to turn base64 payloads into file downloads. */
 
 function base64ToBlob(base64: string, mime: string): Blob {
   const binary = atob(base64)
@@ -15,7 +14,6 @@ function triggerDownload(blob: Blob, fileName: string): void {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  // Revoke on the next tick so the download has started.
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
@@ -24,7 +22,6 @@ const MIME_BY_EXT: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 }
 
-/** Download a generated document; MIME derived from the file extension. */
 export function downloadDocument(fileName: string, base64: string): void {
   const ext = fileName.split('.').pop()?.toLowerCase() ?? ''
   triggerDownload(base64ToBlob(base64, MIME_BY_EXT[ext] ?? 'application/octet-stream'), fileName)

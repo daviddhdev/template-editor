@@ -53,20 +53,12 @@ function appendStyle(element: HTMLElement, declarations: string): void {
   element.setAttribute('style', `${current}${current && !current.endsWith(';') ? ';' : ''}${declarations}`)
 }
 
-/**
- * Google Docs flattens anchored header drawings into consecutive inline
- * spans. Detect the narrow, early-document pattern used by real headers and
- * restore its background/text/logo stacking for HTML editing.
- */
 export function repairFloatingHeaders(input: {
   bodyHtml: string
   css: string
 }): { bodyHtml: string; css: string; repaired: number } {
   const root = parse(`<div id="__repair_root">${input.bodyHtml}</div>`, { comment: false })
   const content = root.querySelector('#__repair_root')!
-  // The public exporter sometimes wraps only the header in a leading <div>,
-  // while authenticated exports may expose the <p> directly. Paragraph order
-  // is stable across both forms, so inspect only the first eight paragraphs.
   const earlyElements = content.querySelectorAll('p').slice(0, 8)
   let repaired = 0
 

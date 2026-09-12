@@ -5,19 +5,12 @@ import { requireRecord, requireString } from './validate'
 
 export type { GoogleStatus }
 
-/**
- * Server functions for the Google OAuth flow — which IS the app's login: the
- * exchange creates/updates the user (per-user refresh token) and opens the
- * session. The heavy lifting lives in googleClient.ts / session.ts, imported
- * dynamically inside each handler so the client bundle never sees them.
- */
 
 function asResultError(err: unknown, fallback: string): { ok: false; error: string; hint?: string } {
   const e = err as { message?: string; hint?: string }
   return { ok: false, error: e?.message || fallback, hint: e?.hint }
 }
 
-/** The session user's Drive permissions, for the top bar and generate dialog. */
 export const googleStatusFn = createServerFn({ method: 'GET' }).handler(
   async (): Promise<Result<GoogleStatus>> => {
     const s = await import('./session')
@@ -33,8 +26,6 @@ export const googleStatusFn = createServerFn({ method: 'GET' }).handler(
   },
 )
 
-/** URL of Google's consent screen the browser must navigate to. Unauthenticated
- * on purpose: it is the login door (also used to re-consent Drive scopes). */
 export const googleAuthUrlFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => ({
     origin: requireString(requireRecord(input, 'petición').origin, 'origin'),
@@ -48,9 +39,6 @@ export const googleAuthUrlFn = createServerFn({ method: 'POST' })
     }
   })
 
-/** Credentials the Google Picker needs in the browser, fetched ON DEMAND each
- * time the picker opens: the user's own short-lived access token (~1h; kept in
- * memory only, never persisted client-side) plus the browser API key. */
 export const pickerConfigFn = createServerFn({ method: 'POST' }).handler(
   async (): Promise<Result<{ accessToken: string; apiKey: string }>> => {
     const s = await import('./session')
@@ -74,9 +62,6 @@ export const pickerConfigFn = createServerFn({ method: 'POST' }).handler(
   },
 )
 
-/** Called by the /oauth/callback route with the code Google redirected with.
- * Completes the LOGIN: upserts the user with their fresh tokens and sets the
- * session cookie. Unauthenticated on purpose (it is how a session is born). */
 export const googleExchangeFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const i = requireRecord(input, 'petición')

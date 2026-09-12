@@ -47,14 +47,10 @@ interface DocProgress {
   status: DocStatus
   files: PdfFile[]
   error?: { error: string; hint?: string }
-  /** True when this doc was (re)generated through the HTML route. */
   viaHtml?: boolean
-  /** Drive upload sub-state — an upload failure never touches `status`, so
-   * the local download stays available. */
   upload?: { status: 'uploading' | 'done' | 'error'; error?: { error: string; hint?: string } }
 }
 
-/** One output document with its per-route payloads. */
 interface Unit {
   name: string
   nativeJob: NativeJob | null
@@ -66,19 +62,6 @@ function fmtDuration(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
-/**
- * Modal that renders the documents and offers the downloads. Three routes:
- * `native` present → Google substitutes the data directly into a copy of the
- * ORIGINAL Drive document (exact fidelity); otherwise with a Google account
- * connected the resolved HTML is converted by Google Docs (exact pagination,
- * approximate styling); otherwise the local engine.
- *
- * Documents are generated ONE SERVER CALL EACH, so the dialog can show live
- * progress (count, elapsed, estimate), let the user cancel between documents,
- * keep going when one fails (the rest still download) and retry failures
- * individually — including retrying a failed native document through the
- * HTML route as an explicit choice.
- */
 export function GenerateDialog({
   jobs,
   native = null,
@@ -90,16 +73,11 @@ export function GenerateDialog({
   onClose,
 }: {
   jobs: PdfJob[]
-  /** Present when the document is unchanged or its edits can be applied
-   * safely to the original Drive file. */
   native?: { sourceFileId: string; jobs: NativeJob[] } | null
-  /** Why `native` is not available (shown so the fidelity change is visible). */
   nativeFallbackReason?: NativeFallbackReason | null
   google: GoogleStatus | null
   warnings?: string[]
-  /** Template title, used to name the Drive batch folder. */
   batchLabel?: string
-  /** Overrides workspace metadata for isolated flows such as manual forms. */
   generationContext?: {
     recipeId: string | null
     templateName: string
@@ -112,9 +90,6 @@ export function GenerateDialog({
   const [docs, setDocs] = useState<DocProgress[] | null>(null)
   const [running, setRunning] = useState(false)
   const [withDocx, setWithDocx] = useState(false)
-  // Output folder is per template (saved with the recipe); the user pastes its
-  // Drive URL. A template with a folder configured uploads by default.
-  // savedRecipe/dataKind/dataUrl feed the generation audit log.
   const workspace = useWorkspace()
   const { outputFolderUrl: workspaceFolder, setOutputFolderUrl, savedRecipe, dataKind: workspaceKind, dataUrl: workspaceUrl } = workspace
   const [manualFolder, setManualFolder] = useState(generationContext?.outputFolderUrl ?? workspaceFolder)
@@ -130,23 +105,15 @@ export function GenerateDialog({
   )
   const outputFolderId = extractGoogleFolderId(outputFolderUrl)
   const [unmatched, setUnmatched] = useState<string[]>([])
-  /** Batch subfolder in Drive, created lazily on the first upload. The name is
-   * fixed once per batch so a FOLDER_GONE recreation reuses it. */
   const batchFolderRef = useRef<BatchFolder | null>(null)
   const batchNameRef = useRef<string | null>(null)
   const [batchFolder, setBatchFolder] = useState<BatchFolder | null>(null)
-  /** Audit-log row of the current batch: promise of its id (start is fired
-   * without await so a slow/down DB never delays the first document). */
   const runIdRef = useRef<Promise<string | null> | null>(null)
-  /** Mirror of `docs` — by the time a batch finishes, the closure state is
-   * stale; the ref always holds the latest per-document progress. */
   const docsRef = useRef<DocProgress[] | null>(null)
   const cancelRef = useRef(false)
   const startRef = useRef(0)
-  /** Elapsed ms accumulated across previous runs (pause/resume keeps total). */
   const elapsedBase = useRef(0)
   const durations = useRef<number[]>([])
-  // 1 s heartbeat so the elapsed/remaining readout moves while a doc renders.
   const [, setTick] = useState(0)
 
   useEffect(() => {
@@ -155,7 +122,6 @@ export function GenerateDialog({
     return () => clearInterval(t)
   }, [running])
 
-  // Escape closes — unless a generation is in flight (progress would be lost).
   const dialogRef = useDialogChrome(() => {
     if (!running) onClose()
   })
@@ -163,9 +129,7 @@ export function GenerateDialog({
   const viaGoogle = google?.connected ?? false
   const viaNative = viaGoogle && native !== null
 
-  // Native and HTML jobs come from the same planGroups() call in the same
-  // order, so pairing is positional — pairing by name would send two groups
-  // with the same label to the FIRST one's job, silently losing a document.
+  // Native and HTML jobs share planGroups() order, so pair them by position.
   const units: Unit[] = useMemo(() => {
     const count = native ? native.jobs.length : jobs.length
     return Array.from({ length: count }, (_, i) => ({
@@ -175,16 +139,11 @@ export function GenerateDialog({
     }))
   }, [native, jobs])
 
-  // Which documents to actually generate (default: all checked). The pre-start
-  // checklist toggles indices into `units`; everything downstream runs over
-  // `activeUnits` so native+HTML stay positionally paired WITHIN the subset.
   const [selected, setSelected] = useState<Set<number>>(() => new Set(units.map((_, i) => i)))
   const [query, setQuery] = useState('')
 
   const activeUnits = useMemo(() => units.filter((_, i) => selected.has(i)), [units, selected])
 
-  // Rows shown in the checklist: filtered by the search box (label match only,
-  // accent/case-insensitive). Hidden rows keep their checked state.
   const shownUnits = useMemo(() => {
     const q = norm(query)
     return units
@@ -245,9 +204,6 @@ export function GenerateDialog({
     }
   }
 
-  /** Batch subfolder inside the template's output folder, created on first
-   * use (or recreated with `force` after a FOLDER_GONE — same name, so the
-   * batch stays together). */
   async function ensureFolder(
     force = false,
   ): Promise<{ ok: true; folder: BatchFolder } | { ok: false; error: string; hint?: string }> {
@@ -270,8 +226,6 @@ export function GenerateDialog({
     return { ok: true, folder: res.data }
   }
 
-  /** Upload one document's files to the batch folder (never blocks the local
-   * download: failures only mark the upload sub-state). */
   async function uploadDoc(i: number, files: PdfFile[]) {
     patch(i, { upload: { status: 'uploading' } })
     const fail = (error: string, hint?: string) =>
@@ -287,7 +241,6 @@ export function GenerateDialog({
         }
         let res = await driveUploadFn({ data: { ...doc, folderId: folder.folder.folderId } })
         if (!res.ok && res.code === 'FOLDER_GONE') {
-          // The user deleted the folder mid-batch: recreate once and retry.
           folder = await ensureFolder(true)
           if (!folder.ok) return fail(folder.error, folder.hint)
           res = await driveUploadFn({ data: { ...doc, folderId: folder.folder.folderId } })
@@ -300,8 +253,6 @@ export function GenerateDialog({
     }
   }
 
-  /** Finalise (or re-finalise after retries) the audit-log row. Best effort:
-   * a missing id (DB down at start) or a failed update never surfaces. */
   async function logFinish() {
     const id = await runIdRef.current?.catch(() => null)
     if (!id || !docsRef.current) return
@@ -335,7 +286,6 @@ export function GenerateDialog({
     }
   }
 
-  /** Generate every document that is not already done (start or resume). */
   async function run(current: DocProgress[] | null) {
     const base =
       current ?? activeUnits.map((u): DocProgress => ({ name: u.name, status: 'pending', files: [] }))
@@ -350,7 +300,6 @@ export function GenerateDialog({
       batchFolderRef.current = null
       batchNameRef.current = null
       setBatchFolder(null)
-      // Open the audit row for the new batch ("Continuar" keeps the same one).
       runIdRef.current = startGenerationFn({
         data: {
           recipeId: auditRecipeId,
@@ -799,7 +748,6 @@ export function GenerateDialog({
   )
 }
 
-/** Normalise a label for accent/case-insensitive search matching. */
 export function norm(s: string): string {
   return s
     .normalize('NFD')
@@ -808,7 +756,6 @@ export function norm(s: string): string {
     .trim()
 }
 
-/** Status line when not running: finished, cancelled midway, or with errors. */
 function cancelRefStatus(pending: number, errors: number, total: number, done: number): string {
   if (pending > 0) return `En pausa — ${done} de ${total} generados`
   if (errors > 0) return `Terminado con ${errors} ${errors === 1 ? 'error' : 'errores'} — ${done} de ${total} generados`

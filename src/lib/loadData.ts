@@ -11,16 +11,11 @@ export type LoadDataResult =
       columns: number
       tabTitle: string | null
       multiTab: boolean
-      /** Columns bound somewhere (campos, agrupación, reglas) but absent from
-       * the data just loaded — typically after switching sheet tabs. */
       missingColumns: string[]
-      /** Formatted columns with cells the format cannot parse (pass through). */
       formatIssues: FormatIssue[]
     }
   | { ok: false; error: string; hint?: string }
 
-/** Warning sentence for `missingColumns`, or '' — appended by the callers to
- * their single success toast (notices are one-at-a-time, no stacking). */
 export function missingColumnsNotice(missing: string[]): string {
   if (missing.length === 0) return ''
   const list = missing.map((c) => `«${c}»`).join(', ')
@@ -29,8 +24,6 @@ export function missingColumnsNotice(missing: string[]): string {
     : ` Ojo: aquí faltan las columnas ${list}, usadas por campos, agrupación o reglas — quedan sin efecto hasta reasignarlas o volver a la pestaña anterior.`
 }
 
-/** Warning sentence for `formatIssues`, or '' — appended to the load toast
- * like {@link missingColumnsNotice} (notices are one-at-a-time). */
 export function formatIssuesNotice(issues: FormatIssue[]): string {
   if (issues.length === 0) return ''
   const parts = issues.map((i) => {
@@ -47,17 +40,10 @@ export function formatIssuesNotice(issues: FormatIssue[]): string {
   return ` Ojo: ${parts.join('; ')} — saldrán tal cual, sin el formato elegido.`
 }
 
-/**
- * Load the data source into the store, together with the spreadsheet's tab
- * list (so the UI can show WHICH tab fed the data and offer switching).
- * Shared by the top bar and by loading a saved template.
- */
 export async function loadDataIntoWorkspace(
   kind: DataSourceKind,
   origin: string,
 ): Promise<LoadDataResult> {
-  // API source: send its config (and the saved recipe id, so the server can
-  // decrypt stored credentials when the login body came back redacted).
   const pre = useWorkspace.getState()
   const apiConfig = kind === 'api_endpoint' ? (pre.apiConfig ?? undefined) : undefined
   const recipeId = pre.savedRecipe?.id
@@ -70,8 +56,6 @@ export async function loadDataIntoWorkspace(
 
   const tabs = tabsRes.ok ? tabsRes.data : []
   if (!res.ok) {
-    // Keep any tab list: switching tabs may be exactly what fixes the error
-    // (e.g. the link points at a deleted tab).
     useWorkspace.getState().setSheetTabs(tabs)
     return res
   }

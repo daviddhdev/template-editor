@@ -115,7 +115,6 @@ describe('decideNativeRoute', () => {
     expect(
       decideNativeRoute({ sourceFile: meta(), editorHtml: '<p>{{TAG}}</p>', editorCss: 'p{color:red}' }),
     ).toEqual({ eligible: true, edits: [] })
-    // Same doc imported with spaced tags: the fingerprint is whitespace-canonical.
     expect(
       decideNativeRoute({
         sourceFile: meta({ fingerprint: fingerprintHtml('<p>{{ TAG }}</p>') }),

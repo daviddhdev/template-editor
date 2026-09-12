@@ -1,8 +1,3 @@
-/**
- * Minimal KEY=VALUE parser for the project's .env (Vite does not surface
- * custom vars into process.env on the server). Quotes and comments tolerated.
- * Shared by the Google credentials and the database URL lookups.
- */
 
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'

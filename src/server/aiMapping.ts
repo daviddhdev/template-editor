@@ -9,14 +9,6 @@ import {
   sampleRowsForMapping,
 } from '../lib/ai/mappingPrompt'
 
-/**
- * AI mapping suggestion («Sugerir vínculos automáticamente»). Sends the
- * UNMAPPED tag names, the column names and a few truncated sample rows to
- * OpenAI and returns a tag→column mapping (null = not confident). Without
- * OPENAI_API_KEY the fn reports `available: false` and the client falls back
- * to the name-similarity heuristic (lib/ai/suggestMapping.ts) — the button
- * never breaks because of missing config.
- */
 
 export type AiMappingOutcome =
   | { available: false }
@@ -25,7 +17,6 @@ export type AiMappingOutcome =
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 const OPENAI_MODEL = 'gpt-5-mini'
 const TIMEOUT_MS = 15_000
-/** Sanity caps: a real template has dozens of tags, not hundreds. */
 const MAX_TAGS = 200
 const MAX_COLUMNS = 200
 
@@ -51,7 +42,7 @@ export const suggestMappingFn = createServerFn({ method: 'POST' })
             for (const [k, v] of Object.entries(row)) out[k] = requireString(v, `sampleRows[${n}].${k}`)
             return out
           })
-    // Server is the trust boundary: re-cap and re-truncate whatever arrived.
+  // Re-cap and re-truncate at the server boundary.
     return { tags, columns, sampleRows: sampleRowsForMapping(rawRows, columns) }
   })
   .handler(async ({ data }): Promise<Result<AiMappingOutcome>> => {

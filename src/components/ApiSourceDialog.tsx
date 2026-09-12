@@ -4,13 +4,6 @@ import { probeApiSourceFn, type ApiProbeResult } from '../server/fetch'
 import { useWorkspace } from '../state/workspaceStore'
 import { Button, ErrorNote, Spinner, TextInput, useDialogChrome } from './ui'
 
-/**
- * Configure an "API externa" data source: the login (token-exchange) and the
- * data endpoint, then a probe that discovers where the records are and which
- * columns exist. Credentials typed here live only in this session's store
- * (authBody); a saved recipe reloads them redacted, and the server fills them
- * from the encrypted copy on probe/load (see server/fetch resolveApiCredentials).
- */
 export function ApiSourceDialog({
   onClose,
   onUse,
@@ -40,7 +33,6 @@ export function ApiSourceDialog({
   })
 
   const candidate = probe?.recordArrays.find((a) => a.path === recordsPath) ?? null
-  // Keep the candidate's column order; only include the checked ones.
   const orderedCols = candidate ? candidate.columns.filter((c) => selectedCols.includes(c)) : selectedCols
 
   function buildConfig(): ApiSourceConfig {
@@ -66,12 +58,10 @@ export function ApiSourceDialog({
       }
       setProbe(res.data)
       if (!res.data.tokenFound) {
-        // Auto-detection failed: ask for the token's path and probe again.
         setNeedTokenPath(true)
         return
       }
       setNeedTokenPath(false)
-      // Default to the first candidate list with all its columns selected.
       const first = res.data.recordArrays[0]
       if (first) {
         setRecordsPath(first.path)

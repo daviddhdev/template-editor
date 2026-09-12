@@ -16,11 +16,6 @@ type LoadError = { error: string; hint?: string } | null
 const selectCls =
   'h-[38px] rounded-lg border border-hairline bg-canvas-soft px-2.5 text-sm font-medium text-ink-secondary outline-none focus:border-primary focus-visible:ring-2 focus-visible:ring-primary/10'
 
-/**
- * Compact top bar: load the template doc and the data, choose grouping,
- * switch edit/preview, and generate. Two rows split by a hairline, like the
- * Notion-style mock: sources above, output controls below.
- */
 export function TopBar({
   canGenerate,
   generateBlockedReason,
@@ -55,8 +50,6 @@ export function TopBar({
   const [showApiDialog, setShowApiDialog] = useState(false)
   const [error, setError] = useState<LoadError>(null)
 
-  // What each input last loaded successfully — pasting the SAME link again
-  // (or the debounce firing after a manual load) must not reload it.
   const lastLoadedRef = useRef<{ template: string | null; data: string | null }>({
     template: null,
     data: null,
@@ -105,8 +98,6 @@ export function TopBar({
       if (res.ok) {
         lastLoadedRef.current.data = origin
         const base = `Datos cargados: ${res.rows} ${res.rows === 1 ? 'fila' : 'filas'}, ${res.columns} columnas`
-        // With several tabs, ALWAYS say which one fed the data — a Share-button
-        // link carries no tab and silently means "the first one".
         const head = res.multiTab && res.tabTitle ? `${base} (pestaña «${res.tabTitle}»).` : `${base}.`
         notify(head + missingColumnsNotice(res.missingColumns) + formatIssuesNotice(res.formatIssues))
       } else setError(res)
@@ -117,16 +108,12 @@ export function TopBar({
     }
   }
 
-  /** Point the link at another tab and reload the rows from it. */
   function switchTab(gid: string) {
     const url = withSheetGid(dataUrl.trim(), gid)
     setDataUrl(url)
     void loadData(url)
   }
 
-  // Typing/pasting a VALID Google link auto-loads after a pause — no «Cargar»
-  // click. Only user input passes through here: draft rehydration writes the
-  // store directly and never fires onChange, so it can't trigger a load.
   function onTemplateUrlInput(value: string) {
     setTemplateUrl(value)
     clearTimer(templateTimer)

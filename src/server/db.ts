@@ -1,14 +1,8 @@
-/**
- * Postgres access (SERVER ONLY — import dynamically from server-function
- * handlers, same pattern as googleClient.ts). One shared client; the schema
- * is applied lazily on first use via a tiny numbered-migrations table, so
- * "docker compose up -d" is the only setup step.
- */
+// Server-only Postgres access; numbered migrations run lazily on first use.
 
 import postgres from 'postgres'
 import { readDotEnv } from './env'
 
-/** Error with a user-facing message + actionable hint. */
 export class DbError extends Error {
   hint?: string
   constructor(message: string, hint?: string) {
@@ -29,7 +23,7 @@ function databaseUrl(): string {
   )
 }
 
-/** Numbered migrations; append only — never edit an applied entry. */
+// Append-only migrations; never edit an applied entry.
 const MIGRATIONS: string[] = [
   `CREATE TABLE recipes (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -47,18 +41,11 @@ const MIGRATIONS: string[] = [
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
-  // Imported Drive file + as-imported fingerprints (lib/nativeMerge.ts):
-  // lets an unedited saved template keep the native generation route.
+  // Imported source snapshot for the native generation route.
   `ALTER TABLE recipes ADD COLUMN source_file jsonb`,
-  // Tag -> rule bindings (anchored conditionals / repeatable sections).
   `ALTER TABLE recipes ADD COLUMN rule_bindings jsonb NOT NULL DEFAULT '{}'`,
-  // Drive folder URL where generated documents are uploaded (per template).
   `ALTER TABLE recipes ADD COLUMN output_folder_url text NOT NULL DEFAULT ''`,
-  // Audit log: one row per generation batch. recipe_id has NO foreign key on
-  // purpose — the audit trail must survive template deletion and keep the
-  // literal id; template_name is a point-in-time snapshot for display.
-  // A row left in status 'running' without finished_at is evidence of an
-  // interrupted batch (browser closed mid-run). Append-only: never DELETE.
+  // Audit rows retain literal recipe ids and interrupted running batches.
   `CREATE TABLE generation_runs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     started_at timestamptz NOT NULL DEFAULT now(),
@@ -79,9 +66,7 @@ const MIGRATIONS: string[] = [
     docs jsonb NOT NULL DEFAULT '[]'
   )`,
   `CREATE INDEX generation_runs_started_at_idx ON generation_runs (started_at DESC)`,
-  // Multiusuario: el login es el OAuth de Google (scope drive + openid email).
-  // El refresh token vive POR USUARIO aquí — sustituye al .google-oauth.json
-  // global. En claro por ahora (cifrado en reposo = pendiente en TODO.md).
+  // Google OAuth identity and per-user refresh token.
   `CREATE TABLE users (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     email text NOT NULL UNIQUE,
@@ -92,44 +77,26 @@ const MIGRATIONS: string[] = [
     created_at timestamptz NOT NULL DEFAULT now(),
     last_login_at timestamptz NOT NULL DEFAULT now()
   )`,
-  // Sesiones opacas: la cookie lleva el token; aquí solo su hash SHA-256.
-  // Las filas caducadas se purgan de forma oportunista en cada login.
   `CREATE TABLE sessions (
     token_hash text PRIMARY KEY,
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at timestamptz NOT NULL DEFAULT now(),
     expires_at timestamptz NOT NULL
   )`,
-  // Plantillas por usuario. Las filas anteriores a la autenticación se borran
-  // (decisión confirmada: no existen plantillas compartidas), lo que permite
-  // owner_id NOT NULL desde el primer día.
   `DELETE FROM recipes`,
   `ALTER TABLE recipes ADD COLUMN owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE`,
   `CREATE INDEX recipes_owner_idx ON recipes (owner_id, updated_at DESC)`,
-  // Historial por usuario. owner_id SIN foreign key a propósito (misma
-  // convención que recipe_id arriba): la auditoría sobrevive al borrado.
   `DELETE FROM generation_runs`,
   `ALTER TABLE generation_runs ADD COLUMN owner_id uuid NOT NULL`,
   `CREATE INDEX generation_runs_owner_idx ON generation_runs (owner_id, started_at DESC)`,
-  // Borrador de trabajo por usuario (autosave del workspace) — sustituye al
-  // localStorage 'ttg-workspace' compartido por navegador. Una fila por
-  // usuario; payload = el MISMO JSON que persiste zustand. saved_at_ms es el
-  // reloj del cliente que guardó: se compara con el espejo local del
-  // navegador al hidratar (gana el más nuevo, ver state/draftStorage.ts).
   `CREATE TABLE workspace_drafts (
     user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     payload text NOT NULL,
     saved_at_ms bigint NOT NULL,
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
-  // Tag -> display format (fecha larga, importe en letra…), lib/engine/format.ts.
   `ALTER TABLE recipes ADD COLUMN tag_formats jsonb NOT NULL DEFAULT '{}'`,
-  // Configuración de la fuente API externa (endpoints, columnas elegidas y las
-  // credenciales de login CIFRADAS en authBodyEnc). Nulo para recetas de hoja.
   `ALTER TABLE recipes ADD COLUMN api_config jsonb`,
-  // One current manual-form draft per user and saved template. Values are
-  // intentionally separate from the workspace draft and are never part of a
-  // recipe or generation audit record.
   `CREATE TABLE manual_form_drafts (
     owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     recipe_id uuid NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -137,9 +104,6 @@ const MIGRATIONS: string[] = [
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (owner_id, recipe_id)
   )`,
-  // Immutable template history. The recipes row remains the denormalised
-  // current head for compatibility with existing readers; every successful
-  // save/restoration also appends the exact same state here.
   `ALTER TABLE recipes ADD COLUMN current_version int NOT NULL DEFAULT 1 CHECK (current_version > 0);
    CREATE TABLE recipe_versions (
      recipe_id uuid NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
@@ -198,7 +162,6 @@ async function migrate(sql: postgres.Sql): Promise<void> {
   }
 }
 
-/** The shared client, with the schema guaranteed. Throws DbError when down. */
 export async function getSql(): Promise<postgres.Sql> {
   if (!client) {
     client = postgres(databaseUrl(), { max: 5, connect_timeout: 4 })
@@ -208,8 +171,6 @@ export async function getSql(): Promise<postgres.Sql> {
       await migrate(client)
       schemaReady = true
     } catch (err) {
-      // Connection-level failures surface as an actionable message; anything
-      // else (bad SQL) should crash loudly during development.
       const code = (err as { code?: string }).code ?? ''
       if (
         code.startsWith('ECONN') ||

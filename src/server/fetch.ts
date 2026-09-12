@@ -23,15 +23,12 @@ import {
   ValidationError,
 } from './validate'
 
-/** Discriminated result so the UI can show friendly errors without try/catch.
- * `code: 'AUTH'` = no session (or expired); the client redirects to /login. */
 export type Result<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; hint?: string; code?: 'AUTH'; fallbackHtml?: boolean }
 
 type FetchError = { ok: false; error: string; hint?: string }
 
-/** Friendly error from a thrown GoogleError-ish (message + optional hint). */
 function errorFrom(err: unknown, fallback: string): FetchError {
   const e = err as { message?: string; hint?: string }
   return { ok: false, error: e?.message || fallback, hint: e?.hint }
@@ -43,16 +40,6 @@ const RECONNECT_FOR_READ: FetchError = {
   hint: 'Desconecta y vuelve a conectar tu cuenta de Google para poder leer documentos privados.',
 }
 
-/**
- * Read a Google Doc and return its editable content (title, CSS, body HTML)
- * so it can be loaded into the in-app editor. Runs on the server, which also
- * sidesteps the browser's CORS restrictions on Google's export endpoints.
- *
- * With a Google account connected (and the read permission granted) the doc is
- * read through the Drive API, so PRIVATE documents the account can see work
- * too. Otherwise — or if the account cannot access it — it falls back to the
- * public export endpoints ("anyone with the link").
- */
 export const fetchDocumentFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const i = requireRecord(input, 'petición')
@@ -71,7 +58,6 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
       }
     }
 
-    // --- Authenticated read (Drive API) when the user's connection allows ---
     let authError: FetchError | null = null
     const g = await import('./googleClient')
     const status = await g.getStatusForUser(user.id)
@@ -81,9 +67,7 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
       } else {
         try {
           const token = await g.getAccessToken(user.id)
-          // The PDF export carries Google's exact pagination, used to sync the
-          // LOCAL fallback engine's page breaks (see pageSync.ts). Optional —
-          // like the file name (the API's HTML export carries no <title>).
+          // The PDF supplies page starts for the local fallback; title is separate.
           const [htmlBytes, pdfBytes, name] = await Promise.all([
             g.exportFile(token, id, 'text/html', 'Google no pudo leer el documento.'),
             g.exportFile(token, id, 'application/pdf').catch(() => null),
@@ -98,22 +82,17 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
             const starts = await extractPageStartTexts(pdfBytes)
             if (starts.length > 0) doc.bodyHtml = annotatePageBreaks(doc.bodyHtml, starts).html
           }
-          // Last mutation before storing: make the document self-contained
-          // (Google's drawing/image URLs are auth-bound and ephemeral).
           doc.bodyHtml = await inlineRemoteImages(doc.bodyHtml, token)
           const repaired = repairFloatingHeaders(doc)
           doc.bodyHtml = repaired.bodyHtml
           doc.css = repaired.css
           return { ok: true, data: doc }
         } catch (err) {
-          // Remember why and fall back to the public export: the doc may be
-          // public even if this account cannot see it.
           authError = errorFrom(err, 'No se pudo leer el documento con tu cuenta de Google.')
         }
       }
     }
 
-    // --- Public export fallback ---------------------------------------------
     const publicHint = status.connected
       ? 'Compártelo con tu cuenta conectada o ábrelo en Google Docs → Compartir → "Cualquier persona con el enlace".'
       : 'Ábrelo en Google Docs → Compartir → "Cualquier persona con el enlace", o conecta arriba la cuenta de Google que tiene acceso.'
@@ -143,9 +122,6 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
     }
 
     if (looksLikeAccessWall(html) && !contentType.includes('text/html; charset')) {
-      // A private doc returns a sign-in page. (Real exports are text/html too,
-      // so we only treat it as a wall when the body clearly asks to sign in.)
-      // With a connected account that also failed, ITS error explains more.
       return (
         authError ?? {
           ok: false,
@@ -160,7 +136,6 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
       return { ok: false, error: 'El documento se leyó pero está vacío.' }
     }
 
-    // Sync page breaks with the original document's own pagination.
     if (pdfBytes) {
       const starts = await extractPageStartTexts(pdfBytes)
       if (starts.length > 0) {
@@ -168,8 +143,6 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
       }
     }
 
-    // Public exports usually serve their images without auth, but a connected
-    // account that can read helps with restricted drawings.
     const inlineToken =
       status.connected && status.canRead ? await g.getAccessToken(user.id).catch(() => null) : null
     doc.bodyHtml = await inlineRemoteImages(doc.bodyHtml, inlineToken)
@@ -180,11 +153,6 @@ export const fetchDocumentFn = createServerFn({ method: 'POST' })
     return { ok: true, data: doc }
   })
 
-/**
- * Read a data source. Google Sheets: through the Sheets API when an account
- * with read permission is connected (private sheets work, and the link's tab
- * `gid` is honoured), falling back to the public CSV export otherwise.
- */
 export const fetchDataFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const i = requireRecord(input, 'petición')
@@ -192,8 +160,6 @@ export const fetchDataFn = createServerFn({ method: 'POST' })
       kind: requireOneOf<DataSourceKind>(i.kind, ['google_sheet', 'api_endpoint'], 'kind'),
       origin: requireString(i.origin, 'origin'),
       apiConfig: optionalApiConfig(i.apiConfig),
-      // The saved recipe whose (encrypted) credentials to use when the client's
-      // apiConfig came back with its login body redacted.
       recipeId: i.recipeId === undefined ? undefined : requireUuid(i.recipeId, 'recipeId'),
     }
   })
@@ -203,7 +169,6 @@ export const fetchDataFn = createServerFn({ method: 'POST' })
     if (!user) return s.AUTH_ERROR
     let authError: FetchError | null = null
 
-    // API source: fill the (redacted) login body from the stored recipe secret.
     const apiConfig =
       data.kind === 'api_endpoint'
         ? await resolveApiCredentials(user.id, data.apiConfig, data.recipeId)
@@ -242,8 +207,6 @@ export const fetchDataFn = createServerFn({ method: 'POST' })
       const result = await source.fetchData()
       return { ok: true, data: result }
     } catch (err) {
-      // The public path failed too; with a connected account, its error is the
-      // actionable one (access, permission, empty sheet…).
       if (authError) return authError
       if (err instanceof DataSourceError) {
         return { ok: false, error: err.message, hint: err.hint }
@@ -252,11 +215,6 @@ export const fetchDataFn = createServerFn({ method: 'POST' })
     }
   })
 
-/**
- * Resolve the login body for an API source: when the client sent it empty
- * (redacted after loading a saved recipe) but the recipe has stored, encrypted
- * credentials, decrypt those. Anything else is returned unchanged.
- */
 async function resolveApiCredentials(
   userId: string,
   apiConfig: ApiSourceConfig | undefined,
@@ -270,24 +228,13 @@ async function resolveApiCredentials(
   return enc ? { ...apiConfig, authBody: decryptSecret(enc) } : apiConfig
 }
 
-/** What the API-config dialog needs after a probe: whether a token was obtained
- * and the candidate record lists (each with its discovered columns). */
 export interface ApiProbeResult {
-  /** True when a token was found — or none is needed (no login URL). */
   tokenFound: boolean
-  /** Arrays-of-objects in the data response, each with its flattened columns. */
   recordArrays: { path: string; count: number; columns: string[] }[]
 }
 
-/** Column discovery from a sample: bound the work to the first rows. */
 const PROBE_SAMPLE = 20
 
-/**
- * Dry-run an API source for the "Configurar API" dialog: log in (if configured),
- * report whether a token was obtained, then GET the data and list the candidate
- * record arrays with their columns — so the user can point at the records and
- * pick columns. Never returns the token itself.
- */
 export const probeApiSourceFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const i = requireRecord(input, 'petición')
@@ -308,7 +255,6 @@ export const probeApiSourceFn = createServerFn({ method: 'POST' })
       let token: string | null = null
       if (config.authUrl) {
         token = tokenFrom(config, await apiLoginJson(config))
-        // No token → tell the dialog to ask for a manual token path; can't GET.
         if (!token) return { ok: true, data: { tokenFound: false, recordArrays: [] } }
       }
       const json = await apiDataJson(config, token)
@@ -324,18 +270,11 @@ export const probeApiSourceFn = createServerFn({ method: 'POST' })
     }
   })
 
-/** One spreadsheet tab, for the tab picker. */
 export interface SheetTab {
   gid: string
   title: string
 }
 
-/**
- * List a spreadsheet's tabs so the UI can show WHICH tab feeds the data and
- * let the user switch (a Share-button link carries no gid, so it silently
- * meant "first tab"). Best-effort: an empty list just hides the picker.
- * Connected: Sheets API. Public: parsed from the sheet's htmlview page.
- */
 export const listSheetTabsFn = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const i = requireRecord(input, 'petición')
@@ -355,7 +294,6 @@ export const listSheetTabsFn = createServerFn({ method: 'POST' })
         const token = await g.getAccessToken(user.id)
         return { ok: true, data: await g.listSheetTabs(token, id) }
       } catch {
-        // e.g. account cannot access this sheet — try the public page below.
       }
     }
 
@@ -365,8 +303,6 @@ export const listSheetTabsFn = createServerFn({ method: 'POST' })
       })
       if (!res.ok) return { ok: true, data: [] }
       const html = await res.text()
-      // htmlview builds its tab menu from embedded JS:
-      //   items.push({name: "Facturas", pageUrl: "…", gid: "1822115617", …})
       const tabs: SheetTab[] = []
       for (const m of html.matchAll(
         /items\.push\(\{name: "((?:[^"\\]|\\.)*)",[^}]*?gid: "(-?\d+)"/g,
@@ -379,7 +315,6 @@ export const listSheetTabsFn = createServerFn({ method: 'POST' })
     }
   })
 
-/** Undo the JS string escapes Google uses in the embedded tab names. */
 function decodeJsString(s: string): string {
   return s
     .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))

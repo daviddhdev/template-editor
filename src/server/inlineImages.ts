@@ -1,20 +1,8 @@
 import { parse } from 'node-html-parser'
 
-/**
- * Replace remote `<img src="http...">` with data: URIs at import time.
- *
- * Google's HTML export references drawings (banner shapes, decorative lines…)
- * through `docs.google.com/drawings/...` URLs that are auth-bound and
- * ephemeral: they 403 in the preview iframe once the session/permissions
- * change, and Google's HTML importer drops them when the edited HTML is
- * re-uploaded. Inlining them once, server-side, makes the editor, the
- * preview, the local PDF and the HTML fallback route all self-contained.
- *
- * Best-effort by design: any per-image failure (network, non-image response,
- * over budget) keeps the original src. Never throws.
- */
+// Inline auth-bound image URLs at import time so previews and exports stay
+// self-contained; failed fetches keep the original src.
 
-/** Only these hosts ever see the OAuth token. */
 function isGoogleHost(url: URL): boolean {
   const h = url.hostname
   return (
@@ -26,8 +14,6 @@ function isGoogleHost(url: URL): boolean {
 }
 
 const PER_IMAGE_LIMIT = 1.5 * 1024 * 1024
-/** The inlined document persists to localStorage (~5 MB origin quota, shared
- * with the row data) — stop inlining once the budget is spent. */
 const TOTAL_BUDGET = 3.5 * 1024 * 1024
 const FETCH_TIMEOUT_MS = 8000
 const CONCURRENCY = 4
@@ -70,7 +56,6 @@ export async function inlineRemoteImages(bodyHtml: string, token: string | null)
     .filter((el) => /^https?:\/\//i.test(el.getAttribute('src') ?? ''))
   if (imgs.length === 0) return bodyHtml
 
-  // Fetch each distinct URL once, a few at a time.
   const srcs = [...new Set(imgs.map((el) => el.getAttribute('src')!))]
   const dataUris = new Map<string, string>()
   for (let i = 0; i < srcs.length; i += CONCURRENCY) {

@@ -41,9 +41,7 @@ async function log(message) {
   await appendFile(RUN_LOG, `${new Date().toISOString()} ${message}\n`, 'utf8')
 }
 
-// TanStack serializes server-function arguments as a small tagged JSON tree.
-// Decode the handful of node types used by the PDF payload so the harness can
-// render the real resolved HTML without depending on private server internals.
+// Decode the tagged JSON tree used by TanStack server-function arguments.
 function decodeServerValue(node) {
   if (node === null || node === undefined) return node
   if (node.t === 1) return node.s
@@ -57,11 +55,8 @@ function decodeServerValue(node) {
   return node.s ?? node.v ?? null
 }
 
-// The controlled PDF payload from this deterministic demo arrives with a
-// second, display-oriented escaping layer inside `html` (for example
-// `\\x3C!doctype html>\\n`). Decode only the escape forms emitted by the app,
-// before handing the controlled demo HTML to Chromium. The loopback and exact
-// generatePdfFn route checks below are required before this renderer is used.
+// Decode the display escaping used in the controlled PDF payload before
+// handing the HTML to Chromium; route checks below keep this interception local.
 function normalizeJobHtml(value) {
   if (typeof value !== 'string') return value
   return value
@@ -210,11 +205,8 @@ async function main() {
     viewport: { width: 1920, height: 1080 },
     recordVideo: { dir: RAW, size: { width: 1920, height: 1080 } },
   })
-  // The app's local PDF endpoint normally launches its own Playwright browser.
-  // In constrained demo environments that child process may not be available,
-  // so the harness fulfills only the exact local generatePdfFn request using a
-  // second, non-recorded context. The UI and plan still come from the real app;
-  // no Google/Drive/native endpoint is intercepted.
+  // Fulfill only the exact local generatePdfFn request in a second context when
+  // the app's child browser is unavailable; the UI and plan remain real.
   const pdfContext = await browser.newContext({ viewport: { width: 1200, height: 900 } })
   const page = await context.newPage()
   page.on('console', (msg) => { if (msg.type() === 'error') console.error('[browser]', msg.text()) })
@@ -255,12 +247,9 @@ async function main() {
       }
       await route.fulfill({
         status: 200,
-        // The demo harness returns the ordinary server-function envelope.  Do
-        // not mark it as a seroval payload: that header makes the client try
-        // to decode this already-JSON object as a tagged transport value.
+        // Return the ordinary JSON envelope; a seroval header would trigger a
+        // second decode of this already-decoded response.
         headers: { 'content-type': 'application/json' },
-        // Server functions return an envelope with `result`; the client-side
-        // RPC wrapper unwraps this before GenerateDialog sees it.
         body: JSON.stringify({ result: { ok: true, data: { files } } }),
       })
     } catch (error) {

@@ -8,11 +8,6 @@ import { substituteTags, type SubstituteOptions } from './substitute'
 
 type MissingMode = SubstituteOptions['onMissing']
 
-/**
- * Replace every inline conditional (`[data-cond]` element) nested inside an
- * HTML fragment with its resolved text for the given row. This is what makes
- * a conditional dropped INSIDE a repeatable section evaluate once per row.
- */
 function resolveInlineConds(
   html: string,
   row: Record<string, string>,
@@ -30,9 +25,6 @@ function resolveInlineConds(
   return wrapper.innerHTML
 }
 
-/** Render one block for one row. An inline-conditional block resolves to the
- * rule's chosen text; any other block substitutes its fields (and any
- * conditionals nested inside it, e.g. within a repeat wrapper). */
 function renderBlockForRow(
   block: TemplateBlock,
   row: Record<string, string>,
@@ -51,14 +43,6 @@ function renderBlockForRow(
   return substituteTags(resolveInlineConds(block.html, row, sub), { ...sub, row })
 }
 
-/**
- * Build the inner body HTML for one output document (one {@link RowGroup}).
- *
- * - Non-repeatable blocks use the group's first row (group-level fields such as
- *   NIF or company name are constant across the group).
- * - Repeatable blocks (only in per_group mode) render once per row of the
- *   group; conditionals inside them are evaluated per row too.
- */
 export function resolveGroupBody(
   plan: GenerationPlan,
   group: RowGroup,
@@ -81,18 +65,7 @@ export function resolveGroupBody(
   return parts.join('\n')
 }
 
-/**
- * Minimal styles layered on top of the ORIGINAL document CSS. We deliberately
- * do NOT set font, colour, line-height or margins here — those must come from
- * the source document so the output is identical to it.
- *
- * Page margins are intentionally NOT set here: the body's own padding (the
- * doc's margins) works for the on-screen preview, but for the PDF that padding
- * would only apply to the first/last page. The PDF step instead reads that
- * padding and turns it into real per-page margins (see `server/pdf.ts`), so
- * every page — not just the first — gets proper top/bottom margins and the page
- * breaks fall where the original document's do.
- */
+// Keep source typography and body padding; pdf.ts converts padding to page margins.
 function frameStyles(): string {
   return `
     /* SCREEN ONLY (the preview iframe): show the document as a centred page
@@ -125,14 +98,7 @@ function frameStyles(): string {
   `
 }
 
-/**
- * Wrap resolved body HTML into a complete, standalone HTML document, preserving
- * the source document's CSS and page-geometry class untouched.
- * The SAME string is used for the on-screen preview (iframe) and for the PDF
- * (Playwright), which is what keeps the preview faithful to the final file.
- */
 export function buildDocumentHtml(plan: GenerationPlan, bodyHtml: string): string {
-  // Escaped: a quote inside the class attribute would break out of it.
   const bodyClass = plan.template.bodyClass
     ? ` class="${escapeHtml(plan.template.bodyClass)}"`
     : ''
@@ -149,7 +115,6 @@ ${bodyHtml}
 </html>`
 }
 
-/** Convenience: resolve a whole group straight to a standalone HTML document. */
 export function resolveGroupDocument(
   plan: GenerationPlan,
   group: RowGroup,

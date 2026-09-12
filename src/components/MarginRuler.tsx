@@ -1,21 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useWorkspace } from '../state/workspaceStore'
 
-/** CSS px per pt inside the iframe (96 dpi), and pt per centimetre. */
 const PX_PER_PT = 4 / 3
 const CM_TO_PT = 28.3465
 
-/**
- * Google-Docs-style horizontal ruler over the canvas. The two draggable
- * triangles set the document's PAGE side margins — i.e. the body padding,
- * which is what the whole pipeline treats as the page margin (server/pdf.ts
- * turns it into real @page margins; Google re-lays it out the same).
- *
- * While dragging, the padding is applied inline on the iframe body (with
- * !important, to beat the stored override) for live feedback; on release the
- * value is committed to the document CSS via setPageMargins, which is what
- * previews, PDFs and saved templates read.
- */
 export function MarginRuler({
   iframeRef,
   docToken,
@@ -33,12 +21,6 @@ export function MarginRuler({
     padR: number
   } | null>(null)
   const dragSide = useRef<'left' | 'right' | null>(null)
-  /**
-   * Page box frozen at drag start. The page width must stay CONSTANT while a
-   * margin moves (the content narrows instead, via max-width) — recomputing
-   * the reference mid-drag would chase the re-centred page and amplify the
-   * movement.
-   */
   const dragBase = useRef<{ pageLeft: number; pageWidth: number } | null>(null)
 
   const measure = useCallback(() => {
@@ -56,7 +38,6 @@ export function MarginRuler({
     })
   }, [iframeRef])
 
-  // The iframe loads/relayouts outside React's knowledge: poll cheaply.
   useEffect(() => {
     measure()
     const t = setInterval(measure, 500)
@@ -69,7 +50,6 @@ export function MarginRuler({
 
   const roundPt = (px: number) => Math.round((px / PX_PER_PT) * 2) / 2
 
-  /** Apply a margin (ruler px) live: pad grows, content narrows, page fixed. */
   const applyPad = useCallback(
     (side: 'left' | 'right', padPx: number) => {
       const doc = iframeRef.current?.contentDocument
@@ -122,7 +102,6 @@ export function MarginRuler({
     onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
       dragSide.current = side
       dragBase.current = { pageLeft: geom.pageLeft, pageWidth: geom.pageWidth }
-      // Snapshot BEFORE the live inline changes: undo restores the old margin.
       useWorkspace.getState().checkpoint('Márgenes de página')
       e.currentTarget.setPointerCapture(e.pointerId)
     },
@@ -141,7 +120,6 @@ export function MarginRuler({
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
       e.preventDefault()
       useWorkspace.getState().checkpoint('Márgenes de página')
-      // 0.25 cm per keypress; the outer edge grows the margin on each side.
       const step = (CM_TO_PT / 4) * PX_PER_PT * (e.key === 'ArrowRight' ? 1 : -1)
       const pad = side === 'left' ? geom.padL + step : geom.padR - step
       applyPad(side, pad)

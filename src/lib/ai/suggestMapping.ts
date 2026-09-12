@@ -1,13 +1,5 @@
 import type { TagMapping } from '../../types'
 
-/**
- * Heuristic field mapping — the FALLBACK for «Sugerir automáticamente».
- *
- * Matches a template field to a data column by comparing their normalised
- * names (accents/spacing/case ignored). The primary path is the AI call in
- * server/aiMapping.ts (suggestMappingFn); the UI falls back to this when the
- * AI is unconfigured or fails, so it must stay pure, synchronous and free.
- */
 function normalise(s: string): string {
   // eslint-disable-next-line no-misleading-character-class
   const COMBINING_MARKS = /[̀-ͯ]/g
@@ -29,7 +21,6 @@ export function suggestMapping(
 
   for (const tag of tags) {
     const nt = normalise(tag)
-    // 1) exact normalised match, 2) one contains the other.
     const exact = normCols.find((c) => c.norm === nt)
     const partial =
       exact ??

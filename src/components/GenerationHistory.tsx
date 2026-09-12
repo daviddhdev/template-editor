@@ -33,11 +33,6 @@ const KIND_LABEL: Record<string, string> = {
   manual_form: 'Formulario manual',
 }
 
-/**
- * Audit trail of generation batches (home screen section). Self-contained:
- * loads its own data so Home stays untouched beyond mounting it. Read-only —
- * the log is append-only by design (legal audit value).
- */
 export function GenerationHistory() {
   const [runs, setRuns] = useState<GenerationRunSummary[] | null>(null)
   const [failed, setFailed] = useState(false)
@@ -72,7 +67,6 @@ export function GenerationHistory() {
       </div>
 
       {failed ? (
-        // The templates section above already shows the big DB ErrorNote.
         <p className="text-sm text-ink-muted">No se pudo cargar el historial de generaciones.</p>
       ) : runs === null ? (
         <Spinner label="Cargando el historial…" />

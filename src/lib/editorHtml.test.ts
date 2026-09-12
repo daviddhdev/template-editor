@@ -42,8 +42,6 @@ describe("decorateFields / undecorateFields", () => {
   });
 
   it("keeps a style applied to the chip ELEMENT itself (chip-only selection)", () => {
-    // Selecting exactly the chip makes Chromium restyle the chip span instead
-    // of wrapping it — that style must be re-homed, not dropped.
     const html =
       '<p><span class="ttg-chip" contenteditable="false" data-field="nombre" ' +
       'style="font-weight: bold;">{{nombre}}</span></p>';

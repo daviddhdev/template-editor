@@ -5,12 +5,6 @@ import { pickerConfigFn } from '../server/google'
 import { openGooglePicker, type PickedFile, type PickerKind } from '../lib/googlePicker'
 import { useWorkspace } from '../state/workspaceStore'
 
-/**
- * Icon button that opens the Google Picker for one kind of file. Credentials
- * are fetched on demand per click (pickerConfigFn) and never stored. Disabled
- * — with a hint explaining why — until the user's connection can read Drive
- * and the server has a picker API key; pasting URLs keeps working regardless.
- */
 export function PickerButton({
   kind,
   google,
@@ -22,7 +16,6 @@ export function PickerButton({
   google: GoogleStatus | null
   onPicked: (file: PickedFile) => void
   label: string
-  /** md matches the 38px top-bar inputs; sm the compact dialog inputs. */
   size?: 'md' | 'sm'
 }) {
   const notify = useWorkspace((s) => s.notify)

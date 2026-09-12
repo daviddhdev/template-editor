@@ -8,11 +8,6 @@ export { DataSourceError } from './types'
 export { GoogleSheetSource } from './googleSheetSource'
 export { ApiEndpointSource } from './apiEndpointSource'
 
-/**
- * Build the right {@link DataSource} for a chosen origin kind. `apiConfig` is
- * required for 'api_endpoint' (the endpoints, credentials and record/column
- * choices); `origin` alone suffices for a Google Sheet.
- */
 export function createDataSource(
   kind: DataSourceKind,
   origin: string,
@@ -23,7 +18,6 @@ export function createDataSource(
       return new GoogleSheetSource(origin)
     case 'api_endpoint':
       return new ApiEndpointSource(
-        // Fall back to a bare GET on `origin` when no config was supplied.
         apiConfig ?? {
           authUrl: '',
           authBody: '',
@@ -36,7 +30,6 @@ export function createDataSource(
     case 'manual_form':
       throw new Error('El formulario manual no se carga desde una URL.')
     default: {
-      // Exhaustiveness guard: adding a new kind forces handling it here.
       const _never: never = kind
       throw new Error(`Origen de datos desconocido: ${String(_never)}`)
     }

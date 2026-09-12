@@ -1,15 +1,5 @@
-/**
- * Client-side half of the NATIVE generation route: instead of rebuilding the
- * document from edited HTML (lossy — Google's HTML importer flattens page
- * headers, drops drawings and degrades font weights), the original Drive file
- * is re-materialised as a Google Doc and the `{{tags}}` are substituted with
- * the Docs API's replaceAllText, which reaches headers and footers too.
- *
- * `decideNativeRoute` compares the imported snapshot with the editor state.
- * Unique text edits inside an unchanged paragraph/cell become native text
- * patches; structural, formatting and margin changes fall back to HTML. The
- * conservative rule is: never silently omit an edit to gain fidelity.
- */
+// Native generation reuses the original Drive file. Only unique text edits in
+// unchanged leaves become patches; structural or ambiguous edits use HTML.
 
 import { HTMLElement, parse, TextNode } from 'node-html-parser'
 import type { GenerationPlan, RuleBindings } from '../types'
@@ -21,63 +11,41 @@ import { fingerprintCss, fingerprintHtml, hashString, normalizeBodyHtml } from '
 import { planGroups } from './plan'
 import { bindingsHaveRichFormatting } from './richText'
 
-/** What `loadRawDocument` captures about the imported Drive file. */
 export interface SourceFileMeta {
-  /** Drive file id of the ORIGINAL template document. */
   id: string
-  /** fingerprintHtml() of the body exactly as imported. */
   fingerprint: string
-  /** fingerprintCss() of the CSS exactly as imported. */
   cssFingerprint: string
-  /**
-   * Exact `{{ ... }}` literals present in the imported document's text, keyed
-   * by trimmed tag name. Captured BEFORE the editor canonicalises whitespace
-   * (`{{ TAG }}` → `{{TAG}}`): replaceAllText matches literal document text,
-   * so the find-strings must carry the original spacing (NBSP included).
-   */
+  // Preserve original spacing because replaceAllText matches literal text.
   tagLiterals: Record<string, string[]>
-  /**
-   * Text-bearing leaves of the imported HTML (paragraphs, headings, list
-   * items and table cells). They let us distinguish a safe text edit from a
-   * structural/formatting edit without storing a second copy of the HTML.
-   * Absent on recipes saved before native editable output was introduced.
-   */
+  // Structural signatures distinguish text edits without storing another HTML copy.
   textSegments?: NativeTextSegment[]
-  /** Field occurrences in source text order. Optional for older recipes. */
   fieldOccurrences?: SourceFieldOccurrence[]
 }
 
 export interface SourceFieldOccurrence {
   tag: string
   literal: string
-  /** Zero-based among occurrences of the same tag. */
   occurrence: number
 }
 
 export interface NativeTextSegment {
-  /** Element name, kept separately for readable diagnostics/tests. */
   tag: string
-  /** Hash of the element/attribute tree with text nodes replaced by #. */
   structure: string
-  /** Exact decoded text exported by Google for this leaf. */
   text: string
 }
 
-/** A safe edit applied to the temporary native Google Doc before mail merge. */
 export interface NativeEdit {
   find: string
   replace: string
 }
 
-/** Add the editable snapshot to an older source record when it is still safe. */
 export function upgradeSourceFileMeta(
   sourceFile: SourceFileMeta | null | undefined,
   editorHtml: string,
 ): SourceFileMeta | null {
   if (!sourceFile) return null
   if (sourceFile.textSegments && sourceFile.fieldOccurrences) return sourceFile
-  // Never bless the current HTML as "original" after an edit: old recipes
-  // without a snapshot must still fall back unless their fingerprint matches.
+  // Never bless edited HTML as the original for an old recipe.
   if (fingerprintHtml(editorHtml) !== sourceFile.fingerprint) return sourceFile
   return {
     ...sourceFile,
@@ -105,10 +73,7 @@ function structureOf(node: HTMLElement): string {
   return `<${node.rawTagName.toLowerCase()}[${attrs}]>${children}</${node.rawTagName.toLowerCase()}>`
 }
 
-/**
- * Ordered editable text leaves. A table cell containing paragraphs contributes
- * those paragraphs, not the cell as well; a plain cell contributes itself.
- */
+/** Ordered text leaves; nested paragraph cells contribute paragraphs only. */
 export function nativeTextSegments(bodyHtml: string): NativeTextSegment[] {
   const root = parse(`<div id="__native_root">${bodyHtml}</div>`, { comment: false })
   const out: NativeTextSegment[] = []
@@ -120,8 +85,7 @@ export function nativeTextSegments(bodyHtml: string): NativeTextSegment[] {
     })
     const tag = el.rawTagName.toLowerCase()
     if (TEXT_CONTAINERS.has(tag) && !hasNestedContainer) {
-      // Hash instead of persisting the raw signature: image src attributes can
-      // contain hundreds of KB of base64 and must not be duplicated in drafts.
+      // Hash signatures so large base64 image attributes are not duplicated.
       out.push({ tag, structure: hashString(structureOf(el)), text: el.textContent })
       return
     }
@@ -147,7 +111,6 @@ function countText(haystacks: string[], needle: string): number {
   return count
 }
 
-/** Minimal changed slice, expanded only until its source text is unique. */
 function uniqueTextEdit(before: string, after: string, sourceTexts: string[]): NativeEdit | null {
   let prefix = 0
   while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++
@@ -163,8 +126,7 @@ function uniqueTextEdit(before: string, after: string, sourceTexts: string[]): N
   const afterEnd = after.length - suffix
   let left = prefix
   let right = beforeEnd
-  // Pure insertion has an empty search. Anchor it to an adjacent original
-  // character; the inserted text then inherits that character's style.
+  // Anchor pure insertions to an adjacent original character for its style.
   if (left === right) {
     if (left > 0) left--
     else if (right < before.length) right++
@@ -180,7 +142,6 @@ function uniqueTextEdit(before: string, after: string, sourceTexts: string[]): N
         replace: `${before.slice(left, prefix)}${after.slice(prefix, afterEnd)}${before.slice(beforeEnd, right)}`,
       }
     }
-    // Add nearby context until unique, alternating left/right where possible.
     if (left === 0 && right === before.length) return null
     if ((expandLeft && left > 0) || right === before.length) left--
     else right++
@@ -188,7 +149,6 @@ function uniqueTextEdit(before: string, after: string, sourceTexts: string[]): N
   }
 }
 
-/** Exact tag literals in the HTML's text, keyed by trimmed tag name. */
 export function tagLiterals(bodyHtml: string): Record<string, string[]> {
   const text = parse(`<div id="__root">${bodyHtml}</div>`, { comment: false }).textContent
   const out: Record<string, string[]> = {}
@@ -220,11 +180,8 @@ interface ExtractedFieldStyles {
   styles: NativeFieldStyle[]
 }
 
-/**
- * Remove only wrappers created by the field-appearance UI and return their
- * native equivalents. Any malformed/expanded wrapper is rejected so an
- * arbitrary formatting edit can never be mistaken for a safe native patch.
- */
+// Reject malformed field-style wrappers so arbitrary formatting is never treated
+// as a safe native patch.
 export function extractNativeFieldStyles(bodyHtml: string): ExtractedFieldStyles | null {
   const root = parse(`<div id="__field_style_root">${bodyHtml}</div>`, { comment: false })
   const content = root.querySelector('#__field_style_root')!
@@ -296,17 +253,11 @@ export function extractNativeFieldStyles(bodyHtml: string): ExtractedFieldStyles
 }
 
 export type NativeFallbackReason =
-  /** Blank document or template without an imported Drive file behind it. */
   | 'no_source'
-  /** Inline blocks inserted in the flow (conditional / repeatable section /
-   * field chips) — content the original Drive doc does not have. The anchored
-   * alternative (bind a {{tag}} to a rule) keeps the native route. */
+  /** Inline constructs absent from the original Drive document. */
   | 'inline_blocks'
-  /** Edit cannot be represented as an unambiguous native text patch. */
   | 'edited'
-  /** CSS changed (ruler margins) — the native output would not reflect it. */
   | 'css_changed'
-  /** A rule-bound tag contains partial rich formatting. */
   | 'formatted_rule'
 
 export function decideNativeRoute(args: {
@@ -320,9 +271,7 @@ export function decideNativeRoute(args: {
   const extracted = extractNativeFieldStyles(editorHtml)
   if (!extracted) return { eligible: false, reason: 'edited' }
   const comparableHtml = extracted.html
-  // In-app inline constructs make the route wrong regardless of what the
-  // fingerprint says (independent of serialisation quirks) — and they get
-  // their own reason so the UI can point at the anchored alternative.
+  // Inline constructs invalidate the native route independently of fingerprints.
   if (
     comparableHtml.includes('data-cond') ||
     comparableHtml.includes('data-ttg-repeat') ||
@@ -340,8 +289,7 @@ export function decideNativeRoute(args: {
     return { eligible: true, edits: [], ...(extracted.styles.length ? { styles: extracted.styles } : {}) }
   }
 
-  // Old saved recipes have no source snapshot. Staying conservative avoids
-  // silently exporting the original while ignoring an edit.
+  // Old recipes without a snapshot stay on the safe fallback route.
   if (!sourceFile.textSegments) return { eligible: false, reason: 'edited' }
   const current = nativeTextSegments(normalizeBodyHtml(comparableHtml))
   if (current.length !== sourceFile.textSegments.length) {
@@ -353,8 +301,7 @@ export function decideNativeRoute(args: {
   for (let i = 0; i < current.length; i++) {
     const before = sourceFile.textSegments[i]
     const after = current[i]
-    // A changed element/attribute tree means formatting or structure changed;
-    // replaceAllText cannot reproduce it faithfully.
+    // replaceAllText cannot reproduce structural or formatting changes.
     if (before.tag !== after.tag || before.structure !== after.structure) {
       return { eligible: false, reason: 'edited' }
     }
@@ -366,15 +313,6 @@ export function decideNativeRoute(args: {
   return { eligible: true, edits, ...(extracted.styles.length ? { styles: extracted.styles } : {}) }
 }
 
-/**
- * One NativeJob per output document (same grouping and naming as the HTML
- * route): every template tag becomes one replacement carrying all its known
- * literal spellings plus the canonical variants as safety nets — an extra
- * variant that matches nothing costs nothing.
- *
- * A rule-bound tag substitutes to its rule's resolved text (perRow rules join
- * one piece per group row); Docs turns the '\n' into paragraph breaks.
- */
 export function buildNativeJobs(
   plan: GenerationPlan,
   literals: Record<string, string[]>,
@@ -383,8 +321,6 @@ export function buildNativeJobs(
 ): NativeJob[] {
   const sub = { mapping: plan.mapping, onMissing: 'empty' as const, tagFormats: plan.tagFormats }
   return planGroups(plan).map((group) => {
-    // Non-repeatable content uses the group's first row (resolveGroupBody
-    // semantics); anchored perRow rules consume the whole group.
     const row = group.rows[0] ?? {}
     const replacements: NativeReplacement[] = plan.template.tags.map((tag) => {
       const finds = [...new Set([...(literals[tag] ?? []), `{{${tag}}}`, `{{ ${tag} }}`])]

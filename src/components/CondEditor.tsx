@@ -22,7 +22,6 @@ const selectCls =
 export interface RichTextSelection {
   element: HTMLElement
   range: Range
-  /** Pull the DOM produced by execCommand back into the local rule state. */
   sync: () => void
 }
 
@@ -63,12 +62,11 @@ function RichTextField({
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    // Initialize once; rewriting innerHTML would reset the caret.
     el.innerHTML = html ? sanitizeRichText(html) : plainTextToRichHtml(text)
     const doc = el.ownerDocument
     doc.addEventListener('selectionchange', publishSelection)
     return () => doc.removeEventListener('selectionchange', publishSelection)
-    // The field is intentionally initialised once. React state follows DOM
-    // input; rewriting innerHTML on each keystroke would destroy the caret.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -100,12 +98,6 @@ function RichTextField({
   )
 }
 
-/**
- * Popover form for one conditional rule. Edits a local copy; "Guardar" hands
- * it back to the caller — the canvas (inline conditional written into the
- * document) or a tag binding (anchored rule stored in the workspace).
- * `perRow` non-null shows the "repeat once per row" toggle (tag bindings).
- */
 export function CondEditor({
   initial,
   columns,
@@ -117,7 +109,6 @@ export function CondEditor({
 }: {
   initial: ConditionalRule
   columns: string[]
-  /** null hides the toggle (inline conditionals); boolean sets its start value. */
   perRow?: boolean | null
   onSave: (rule: ConditionalRule, perRow: boolean) => void
   onDelete: () => void
@@ -136,10 +127,7 @@ export function CondEditor({
       branches: r.branches.map((b) => (b.id === id ? { ...b, ...patch } : b)),
     }))
 
-  // Soft validation: warn about rules that would ALWAYS fire («contiene»
-  // with an empty value matches every row) or that can never match (no
-  // column chosen — e.g. the editor was opened before loading the data).
-  // «es igual a» with an empty value is legitimate: "if the cell is blank".
+  // Warn about always-true and impossible rules.
   const alwaysTrue = rule.branches.some((b) => b.operator === 'contains' && !b.value.trim())
   const noColumn = rule.branches.some((b) => !b.column)
 

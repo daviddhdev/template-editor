@@ -1,16 +1,10 @@
 import { useId, type SVGProps } from 'react'
 
 export type BrandMarkProps = Omit<SVGProps<SVGSVGElement>, 'title'> & {
-  /** Accessible name for icon-only use. Omit when a visible wordmark is next to the mark. */
   label?: string
   size?: number
 }
 
-/**
- * Talos' document mark: structured data lines converge into a sheet, with a
- * small bronze folded-page detail. Keep this geometry simple so it survives at
- * favicon size as well as in the application header.
- */
 export function BrandMark({ label, size = 40, className, ...props }: BrandMarkProps) {
   const id = useId()
   const titleId = label ? `talos-mark-title-${id}` : undefined
@@ -49,7 +43,6 @@ export type BrandLockupProps = {
   markClassName?: string
 }
 
-/** Shared Talos identity for headers and the login screen. */
 export function BrandLockup({ variant = 'compact', className = '', markClassName = '' }: BrandLockupProps) {
   const full = variant === 'full'
   return (

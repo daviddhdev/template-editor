@@ -7,13 +7,6 @@ import { shutdownDraftSync } from '../state/draftStorage'
 import { LOGIN_REDIRECT_KEY } from '../routes/login'
 import { ConfirmDialog } from './ui'
 
-/**
- * Compact account chip for the header: the session user (the Google OAuth
- * consent IS the login), a logout action, and a reconnect action when the
- * user's Drive connection lacks permissions or died (revoked refresh token).
- * Reconnecting simply reruns the consent flow: the fresh refresh token
- * overwrites the stored one on the exchange.
- */
 export function GoogleConnect({
   status,
   onChanged,
@@ -28,7 +21,6 @@ export function GoogleConnect({
 
   if (!status) return null
 
-  /** Rerun the Google consent (login) flow, returning to the current screen. */
   async function reconnect() {
     setBusy(true)
     setError(null)
@@ -53,8 +45,6 @@ export function GoogleConnect({
     setBusy(true)
     setError(null)
     try {
-      // Draft to the DB first (and, if it got there, the local mirror goes:
-      // nothing personal stays on a shared browser).
       await shutdownDraftSync()
       await logoutFn()
     } finally {

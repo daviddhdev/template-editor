@@ -61,7 +61,6 @@ function sanitiseNode(node: Node): string {
   return children
 }
 
-/** Canonical, allow-listed fragment safe to persist and render. */
 export function sanitizeRichText(html: string): string {
   const root = parse(`<div id="__rich">${html}</div>`, { comment: false }).querySelector('#__rich')!
   const lines: string[] = []
@@ -85,7 +84,6 @@ export function sanitizeRichText(html: string): string {
   return lines.join('') || '<p><br></p>'
 }
 
-/** Visible text with paragraph/line boundaries restored. */
 export function richTextToPlainText(html: string): string {
   const canonical = sanitizeRichText(html)
     .replace(/<p(?:\s+style="[^"]*")?><br><\/p>/gi, '<p></p>')
@@ -95,7 +93,6 @@ export function richTextToPlainText(html: string): string {
   return text.replace(/\u00a0/g, ' ').replace(/\n$/, '')
 }
 
-/** Plain text -> the contenteditable representation used by CondEditor. */
 export function plainTextToRichHtml(text: string): string {
   return text
     .split(/\r?\n/)
@@ -105,11 +102,9 @@ export function plainTextToRichHtml(text: string): string {
 
 export interface NormalizedRichText {
   text: string
-  /** Only present when bold/italic/underline/alignment remains. */
   html?: string
 }
 
-/** Collapse a contenteditable value back to the dual persisted form. */
 export function normalizeRichText(html: string): NormalizedRichText {
   const sanitized = sanitizeRichText(html)
   const formatted = /<(?:span|p)\s+style="/.test(sanitized)
@@ -128,7 +123,6 @@ function safeCssValue(value: string | undefined, kind: 'font' | 'size' | 'line' 
   return v
 }
 
-/** Validate style contexts before putting them back into an HTML attribute. */
 export function sanitizeConditionalTextStyle(
   style: ConditionalTextStyle | undefined,
 ): ConditionalTextStyle | undefined {
@@ -177,7 +171,6 @@ function withBaseStyle(html: string, style: ConditionalTextStyle | undefined): s
   return css ? `<div style="${escapeHtml(css)}">${html}</div>` : html
 }
 
-/** Render canonical rich content as blocks or as a safe inline replacement. */
 export function renderRichText(
   html: string,
   mode: 'block' | 'inline',

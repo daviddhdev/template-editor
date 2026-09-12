@@ -33,7 +33,6 @@ import { BrandLockup } from './Brand'
 
 const dateFmt = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
 
-/** Decorative-only "sticker" colours for the card icons, cycled per card. */
 const CARD_ACCENTS = [
   'text-primary',
   'text-bronze',
@@ -43,11 +42,6 @@ const CARD_ACCENTS = [
   'text-gold',
 ]
 
-/**
- * Home screen, Drive-style: recent work first. A highlighted "continue where
- * you left off" card (the autosaved workspace) plus the template library from
- * the database as thumbnail cards. The editor lives at /editor.
- */
 export function HomeScreen() {
   const navigate = useNavigate()
   const { editorHtml, editorTitle, notice, noticeToken, clearNotice, notify, reset } =
@@ -78,8 +72,6 @@ export function HomeScreen() {
     }
   }, [])
 
-  // Session/Drive chip in the header (same as the editor's): shows who is
-  // logged in and offers reconnect when Drive permissions are missing.
   const [google, setGoogle] = useState<GoogleStatus | null>(null)
   const refreshGoogle = useCallback(() => {
     googleStatusFn()
@@ -88,8 +80,6 @@ export function HomeScreen() {
   }, [])
   useEffect(refreshGoogle, [refreshGoogle])
 
-  // Wait for the authed layout's workspace hydration before listing the
-  // database-backed template library.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -113,7 +103,6 @@ export function HomeScreen() {
       useWorkspace.getState().loadRecipe(res.data)
       notify(`Plantilla «${res.data.name}» abierta.`)
       void navigate({ to: '/editor' })
-      // Rows are per-batch: re-read them from the saved source right away.
       if (res.data.dataUrl.trim()) {
         const dataRes = await loadDataIntoWorkspace(res.data.dataKind, res.data.dataUrl.trim())
         if (dataRes.ok) {
@@ -363,8 +352,6 @@ export function HomeScreen() {
             const res = await deleteRecipeFn({ data: { id: deleting.id } }).catch(() => null)
             setDeleting(null)
             if (res?.ok) {
-              // The draft may be linked to this row: unlink so "Guardar
-              // cambios" doesn't target a template that no longer exists.
               const ws = useWorkspace.getState()
               if (ws.savedRecipe?.id === deleting.id) ws.setSavedRecipe(null)
               notify('Plantilla eliminada.')
@@ -381,7 +368,6 @@ export function HomeScreen() {
   )
 }
 
-/** Per-card actions menu (Drive's ⋮). */
 function CardMenu({
   summary,
   onClose,
@@ -455,7 +441,6 @@ function RenameDialog({
     const res = await renameRecipeFn({ data: { id: summary.id, name } }).catch(() => null)
     setBusy(false)
     if (res?.ok) {
-      // Keep the linked draft's name in sync (shown by the save dialog).
       const ws = useWorkspace.getState()
       if (ws.savedRecipe?.id === summary.id) {
         ws.setSavedRecipe({ id: summary.id, name: name.trim() || 'Sin nombre' })

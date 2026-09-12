@@ -1,12 +1,3 @@
-/**
- * Google Picker (the official Drive file selector) as a promise. CLIENT-ONLY:
- * loads Google's gapi script on demand (the app has no index.html — SSR), so
- * nothing here may run during server render.
- *
- * Credentials come from pickerConfigFn per opening: the user's own short-lived
- * OAuth access token plus the browser API key. Neither is stored — they live
- * only in the scope of the `openGooglePicker` call.
- */
 
 export type PickerKind = 'document' | 'spreadsheet' | 'folder'
 
@@ -26,24 +17,15 @@ const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 const SHEET_MIME = 'application/vnd.google-apps.spreadsheet'
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
-/**
- * The URL the rest of the app already understands for a picked file: it must
- * round-trip through extractGoogleId / extractGoogleFolderId (lib/url.ts), so
- * the picker plugs into the exact same load path as a pasted link.
- */
 export function canonicalPickedUrl(kind: PickerKind, file: PickedFile): string {
   if (kind === 'folder') return `https://drive.google.com/drive/folders/${file.id}`
   if (kind === 'spreadsheet') return `https://docs.google.com/spreadsheets/d/${file.id}/edit`
-  // A template can be a native Google Doc or a .docx stored in Drive; the
-  // latter has no docs.google.com editor URL of its own.
   return file.mimeType === DOC_MIME
     ? `https://docs.google.com/document/d/${file.id}/edit`
     : `https://drive.google.com/file/d/${file.id}/view`
 }
 
-// --- gapi / picker plumbing --------------------------------------------------
 
-/** The tiny slice of Google's globals the picker needs (no npm typings dep). */
 interface PickerNamespace {
   DocsView: new (viewId?: unknown) => {
     setMimeTypes(mimes: string): unknown
@@ -83,7 +65,6 @@ const LOAD_ERROR = new Error(
 
 let pickerApi: Promise<PickerNamespace> | null = null
 
-/** Inject the gapi script once and load its `picker` module (memoized). */
 function loadPickerApi(): Promise<PickerNamespace> {
   if (pickerApi) return pickerApi
   pickerApi = new Promise<PickerNamespace>((resolve, reject) => {
@@ -117,8 +98,6 @@ function viewFor(picker: PickerNamespace, kind: PickerKind): unknown {
     view.setMimeTypes(FOLDER_MIME)
     return view
   }
-  // Folder navigation on every view. Trade-off (accepted): with
-  // setIncludeFolders(true) Google hides the search field in that view.
   if (kind === 'spreadsheet') {
     const view = new picker.DocsView(picker.ViewId.SPREADSHEETS)
     view.setIncludeFolders(true)
@@ -126,12 +105,12 @@ function viewFor(picker: PickerNamespace, kind: PickerKind): unknown {
     return view
   }
   const view = new picker.DocsView(picker.ViewId.DOCS)
+  // Folder navigation hides Google's search field in this view.
   view.setIncludeFolders(true)
   view.setMimeTypes(`${DOC_MIME},${DOCX_MIME}`)
   return view
 }
 
-/** Open the picker and resolve with the chosen file, or null on cancel. */
 export async function openGooglePicker(
   kind: PickerKind,
   cfg: PickerCredentials,

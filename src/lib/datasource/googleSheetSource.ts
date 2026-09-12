@@ -5,14 +5,6 @@ import { extractGoogleId, extractSheetGid, googleSheetCsvUrl, looksLikeAccessWal
 import type { DataSource } from './types'
 import { DataSourceError } from './types'
 
-/**
- * Reads a public Google Sheet by exporting the tab as CSV.
- *
- * No OAuth today — only sheets shared as "anyone with the link" work. When we
- * add real auth later, create an `AuthedGoogleSheetSource` that uses the Sheets
- * API with a token and returns the same {@link DataSourceData}. Nothing else
- * in the app needs to change.
- */
 export class GoogleSheetSource implements DataSource {
   readonly kind = 'google_sheet' as const
 
@@ -26,7 +18,6 @@ export class GoogleSheetSource implements DataSource {
         'Copia el enlace desde el botón "Compartir" o la barra de direcciones de la hoja.',
       )
     }
-    // No gid in the link = first tab, matching the authenticated route.
     const url = googleSheetCsvUrl(id, extractSheetGid(this.origin))
 
     let res: Response
@@ -38,7 +29,6 @@ export class GoogleSheetSource implements DataSource {
 
     const body = await res.text()
 
-    // A private sheet redirects to an HTML sign-in page instead of CSV.
     const contentType = res.headers.get('content-type') ?? ''
     if (!res.ok || contentType.includes('text/html') || looksLikeAccessWall(body)) {
       throw new DataSourceError(
@@ -47,8 +37,6 @@ export class GoogleSheetSource implements DataSource {
       )
     }
 
-    // Duplicate headers become "Nombre", "Nombre (2)"…: papaparse would
-    // otherwise keep only the LAST duplicate column's values in each row.
     const used = new Set<string>()
     const parsed = Papa.parse<Record<string, string>>(body, {
       header: true,
@@ -61,14 +49,12 @@ export class GoogleSheetSource implements DataSource {
       throw new DataSourceError('La hoja está vacía o no tiene una fila de encabezados.')
     }
 
-    // Normalise: ensure every row has every column as a string.
     const rows = parsed.data
       .map((raw) => {
         const row: Record<string, string> = {}
         for (const col of columns) row[col] = (raw[col] ?? '').toString()
         return row
       })
-      // Drop rows that are entirely empty.
       .filter((row) => columns.some((c) => row[c].trim() !== ''))
 
     if (rows.length === 0) {
